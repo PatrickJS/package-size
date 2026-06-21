@@ -1,0 +1,80 @@
+{
+  "name": "@patrickjs/package-size",
+  "version": "0.1.0",
+  "description": "Browser-resolved npm package artifact size checker.",
+  "type": "module",
+  "private": false,
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "packageManager": "pnpm@9.15.4",
+  "bin": {
+    "package-size": "./bin/package-size.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PatrickJS/package-size.git"
+  },
+  "homepage": "https://patrickjs.github.io/package-size/",
+  "bugs": {
+    "url": "https://github.com/PatrickJS/package-size/issues"
+  },
+  "scripts": {
+    "build": "vite build",
+    "dev": "node server/index.js --dev",
+    "pack:check": "npm --cache .npm-cache pack --dry-run --json --ignore-scripts",
+    "pages:build": "vite build --base /package-size/ --outDir .async/pages",
+    "pipeline:github:check": "async-pipeline github check",
+    "pipeline:github:generate": "async-pipeline github generate",
+    "pipeline:pages": "async-pipeline run-task docs.site",
+    "pipeline:publish": "async-pipeline run publish",
+    "pipeline:publish-github": "async-pipeline run publish-github",
+    "pipeline:publish:github:main": "async-pipeline publish github main --package .",
+    "pipeline:publish:github:release": "async-pipeline publish github release --package .",
+    "pipeline:publish:npm": "async-pipeline publish npm --package .",
+    "pipeline:release-doctor": "async-pipeline run release-doctor",
+    "pipeline:release:doctor": "async-pipeline release doctor --package .",
+    "pipeline:release:ensure": "async-pipeline release ensure --package .",
+    "pipeline:snapshot": "async-pipeline run snapshot",
+    "pipeline:sync:check": "async-pipeline sync check",
+    "pipeline:sync:generate": "async-pipeline sync generate",
+    "pipeline:task:build": "async-pipeline run-task build",
+    "pipeline:task:docs.site": "async-pipeline run-task docs.site",
+    "pipeline:task:pack": "async-pipeline run-task pack",
+    "pipeline:task:test": "async-pipeline run-task test",
+    "pipeline:verify": "async-pipeline run verify",
+    "preview": "node server/index.js",
+    "release:check": "pnpm run pipeline:verify",
+    "test": "vitest run"
+  },
+  "files": [
+    "README.md",
+    "bin",
+    "dist",
+    "server",
+    "src/package-url.js",
+    "index.html"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@async/json": "^0.4.0",
+    "brotli-wasm": "3.0.1",
+    "lucide-react": "1.21.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@async/pipeline": "0.9.29",
+    "@tailwindcss/vite": "4.3.1",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
+    "@vitejs/plugin-react": "6.0.2",
+    "jsdom": "29.1.1",
+    "tailwindcss": "4.3.1",
+    "vite": "8.0.16",
+    "vitest": "4.1.9"
+  }
+}
