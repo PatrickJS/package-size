@@ -2,6 +2,18 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+.shareable-details > summary {
+  list-style: none;
+}
+
+.shareable-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.shareable-details[open] .shareable-chevron {
+  transform: rotate(180deg);
+}
+
 .url-builder-popover {
   width: min(720px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);

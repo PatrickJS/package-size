@@ -89,6 +89,21 @@ describe("App", () => {
     expect(window.localStorage.getItem("package-size.recent-searches.v2")).toContain("react@19.2.7");
   });
 
+  it("collapses and expands the shareable resolver URL panel", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const summary = screen.getByText("Shareable resolver URL");
+    const panel = summary.closest("details");
+    expect(panel?.open).toBe(true);
+
+    await user.click(summary);
+    expect(panel?.open).toBe(false);
+
+    await user.click(summary);
+    expect(panel?.open).toBe(true);
+  });
+
   it("uses URL builder options when resolving", async () => {
     const user = userEvent.setup();
     render(<App />);

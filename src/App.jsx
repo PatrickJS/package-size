@@ -1,5 +1,6 @@
 import {
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Clipboard,
   Code2,
@@ -58,8 +59,8 @@ const sampleResult = {
 
 const toneStyles = {
   minified: {
-    text: "text-[#07818c] dark:text-[#39c5cf]",
-    bar: "bg-linear-to-r from-[#0b8792] to-[#08737d] dark:from-[#39c5cf] dark:to-[#1d9bf0]",
+    text: "text-[#1d9bf0] dark:text-[#39c5cf]",
+    bar: "bg-linear-to-r from-[#1d9bf0] to-[#1a8cd8] dark:from-[#39c5cf] dark:to-[#1d9bf0]",
   },
   gzip: {
     text: "text-[#1f7ae8] dark:text-[#1d9bf0]",
@@ -82,7 +83,7 @@ const tdClass =
 const mobileLabelClass =
   "hidden max-[680px]:mb-[3px] max-[680px]:block max-[680px]:text-[11px] max-[680px]:font-bold max-[680px]:text-[#8b95a4] dark:text-[#8b98a5]";
 const fieldClass =
-  "h-10 w-full rounded-[7px] border border-[#cbd4de] bg-white px-3 text-[15px] text-[#111827] outline-0 focus:border-[#07818c] focus:ring-2 focus:ring-[#07818c]/15 dark:border-[#38444d] dark:bg-[#192734] dark:text-[#f7f9f9] dark:focus:border-[#1d9bf0] dark:focus:ring-[#1d9bf0]/20";
+  "h-10 w-full rounded-[7px] border border-[#cbd4de] bg-white px-3 text-[15px] text-[#111827] outline-0 focus:border-[#1d9bf0] focus:ring-2 focus:ring-[#1d9bf0]/15 dark:border-[#38444d] dark:bg-[#192734] dark:text-[#f7f9f9] dark:focus:border-[#1d9bf0] dark:focus:ring-[#1d9bf0]/20";
 
 function defaultSizeOptions() {
   return {
@@ -279,7 +280,7 @@ async function fetchPackageSize(query, sizeOptions) {
 function BrandMark() {
   return (
     <div
-      className="inline-grid h-[38px] w-[38px] flex-none place-items-center rounded-[7px] border border-[#b7dfe3] bg-[#dff5f6] text-[#07818c] dark:border-[#38444d] dark:bg-[#223949] dark:text-[#1d9bf0]"
+      className="inline-grid h-[38px] w-[38px] flex-none place-items-center rounded-[7px] border border-[#b9e3ff] bg-[#e8f5fe] text-[#1d9bf0] dark:border-[#38444d] dark:bg-[#223949] dark:text-[#1d9bf0]"
       aria-hidden="true"
     >
       <PackageSearch size={25} strokeWidth={2.4} />
@@ -297,7 +298,7 @@ function Header({ theme, onToggleTheme }) {
         <h1 className="m-0 text-[22px] leading-[1.1] font-[750] text-[#111827] dark:text-[#f7f9f9] max-[680px]:text-xl">
           Package Size
         </h1>
-        <span className="max-w-full wrap-anywhere rounded-[7px] border border-[#a9d8dd] bg-[#dff5f6] px-2.5 py-[3px] text-[15px] font-[650] whitespace-nowrap text-[#00616c] dark:border-[#38444d] dark:bg-[#223949] dark:text-[#8ecdf8]">
+        <span className="max-w-full wrap-anywhere rounded-[7px] border border-[#b9e3ff] bg-[#e8f5fe] px-2.5 py-[3px] text-[15px] font-[650] whitespace-nowrap text-[#0f6fb8] dark:border-[#38444d] dark:bg-[#223949] dark:text-[#8ecdf8]">
           @patrickjs/package-size
         </span>
       </div>
@@ -346,26 +347,33 @@ function Homepage({ previewUrl }) {
           <span>Resolved versions are pinned in recents so later runs use the stable URL UNPKG selected.</span>
         </div>
       </div>
-      <aside className="rounded-[7px] border border-[#cbd4de] bg-white p-5 shadow-[0_8px_22px_rgba(15,23,42,0.05)] dark:border-[#38444d] dark:bg-[#192734] dark:shadow-none">
-        <div className="mb-4 flex items-center gap-2.5 text-[15px] font-bold text-[#07818c] dark:text-[#8ecdf8]">
-          <Link2 size={18} aria-hidden="true" />
-          <span>Shareable resolver URL</span>
-        </div>
-        <h3 className="m-0 text-[22px] font-extrabold text-[#111827] dark:text-[#f7f9f9]">Build a UNPKG variant</h3>
-        <p className="m-0 mt-2 text-[15px] leading-[1.4] text-[#5b6678] dark:text-[#8b98a5]">
-          Open the builder to set package, subpath, target, export conditions, metadata, and bundle flags. Resolving updates the dashboard URL with the package and UNPKG query parameters.
-        </p>
-        <code className="mt-4 block max-h-[88px] overflow-auto wrap-anywhere rounded-[7px] border border-[#e1e7ed] bg-[#f7fafc] px-3 py-2.5 text-[13px] leading-[1.35] text-[#111827] dark:border-[#38444d] dark:bg-[#15202b] dark:text-[#f7f9f9]">
-          {previewUrl || "Enter a valid package spec to preview the URL."}
-        </code>
-        <button
-          className="mt-4 inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-[7px] border-0 bg-linear-to-b from-[#0b8d98] to-[#087580] px-4 text-[16px] font-bold text-white shadow-[0_10px_24px_rgba(7,129,140,0.18)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] dark:from-[#1d9bf0] dark:to-[#1a8cd8] dark:shadow-[0_12px_28px_rgba(29,155,240,0.18)]"
-          type="button"
-          popovertarget={URL_BUILDER_POPOVER_ID}
-        >
-          <Link2 size={18} />
-          URL builder
-        </button>
+      <aside className="rounded-[7px] border border-[#cbd4de] bg-white shadow-[0_8px_22px_rgba(15,23,42,0.05)] dark:border-[#38444d] dark:bg-[#192734] dark:shadow-none">
+        <details className="shareable-details" open>
+          <summary className="flex min-h-14 cursor-pointer items-center justify-between gap-3 px-5 py-4 text-[15px] font-bold text-[#1d9bf0] focus-visible:outline-2 focus-visible:outline-offset-[-4px] focus-visible:outline-[#1d9bf0] dark:text-[#8ecdf8]">
+            <span className="flex items-center gap-2.5">
+              <Link2 size={18} aria-hidden="true" />
+              <span>Shareable resolver URL</span>
+            </span>
+            <ChevronDown className="shareable-chevron transition-transform" size={19} aria-hidden="true" />
+          </summary>
+          <div className="px-5 pb-5">
+            <h3 className="m-0 text-[22px] font-extrabold text-[#111827] dark:text-[#f7f9f9]">Build a UNPKG variant</h3>
+            <p className="m-0 mt-2 text-[15px] leading-[1.4] text-[#5b6678] dark:text-[#8b98a5]">
+              Open the builder to set package, subpath, target, export conditions, metadata, and bundle flags. Resolving updates the dashboard URL with the package and UNPKG query parameters.
+            </p>
+            <code className="mt-4 block max-h-[88px] overflow-auto wrap-anywhere rounded-[7px] border border-[#e1e7ed] bg-[#f7fafc] px-3 py-2.5 text-[13px] leading-[1.35] text-[#111827] dark:border-[#38444d] dark:bg-[#15202b] dark:text-[#f7f9f9]">
+              {previewUrl || "Enter a valid package spec to preview the URL."}
+            </code>
+            <button
+              className="mt-4 inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-[7px] border-0 bg-linear-to-b from-[#1d9bf0] to-[#1a8cd8] px-4 text-[16px] font-bold text-white shadow-[0_10px_24px_rgba(29,155,240,0.20)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1d9bf0] dark:from-[#1d9bf0] dark:to-[#1a8cd8] dark:shadow-[0_12px_28px_rgba(29,155,240,0.18)]"
+              type="button"
+              popovertarget={URL_BUILDER_POPOVER_ID}
+            >
+              <Link2 size={18} />
+              URL builder
+            </button>
+          </div>
+        </details>
       </aside>
     </section>
   );
@@ -552,7 +560,7 @@ function UrlBuilderPopover({
             </p>
           ) : null}
           <button
-            className="inline-flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-[7px] border-0 bg-linear-to-b from-[#0b8d98] to-[#087580] text-[18px] font-bold text-white shadow-[0_10px_24px_rgba(7,129,140,0.20)] disabled:cursor-wait disabled:opacity-80 dark:from-[#1d9bf0] dark:to-[#1a8cd8] dark:shadow-[0_12px_28px_rgba(29,155,240,0.18)]"
+            className="inline-flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-[7px] border-0 bg-linear-to-b from-[#1d9bf0] to-[#1a8cd8] text-[18px] font-bold text-white shadow-[0_10px_24px_rgba(29,155,240,0.20)] disabled:cursor-wait disabled:opacity-80 dark:from-[#1d9bf0] dark:to-[#1a8cd8] dark:shadow-[0_12px_28px_rgba(29,155,240,0.18)]"
             type="button"
             disabled={loading}
             onClick={resolveFromBuilder}
@@ -570,7 +578,7 @@ function CheckboxControl({ label, checked, onChange }) {
   return (
     <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-[7px] border border-[#d9e0e7] bg-[#fbfcfd] px-3 text-[14px] font-[650] text-[#354153] dark:border-[#38444d] dark:bg-[#15202b] dark:text-[#d6dde4]">
       <input
-        className="h-4 w-4 accent-[#07818c] dark:accent-[#1d9bf0]"
+        className="h-4 w-4 accent-[#1d9bf0] dark:accent-[#1d9bf0]"
         type="checkbox"
         checked={checked}
         onChange={onChange}
@@ -583,7 +591,7 @@ function CheckboxControl({ label, checked, onChange }) {
 function SearchForm({ query, setQuery, onSubmit, loading }) {
   return (
     <form className="mb-7 flex items-center gap-4 max-[980px]:flex-col max-[980px]:items-stretch" onSubmit={onSubmit}>
-      <div className="flex h-14 flex-1 items-center rounded-[7px] border-2 border-[#07818c] bg-white text-[#667282] shadow-[0_5px_16px_rgba(0,97,108,0.08)] dark:border-[#1d9bf0] dark:bg-[#192734] dark:text-[#8b98a5] dark:shadow-none">
+      <div className="flex h-14 flex-1 items-center rounded-[7px] border-2 border-[#1d9bf0] bg-white text-[#667282] shadow-[0_5px_16px_rgba(29,155,240,0.10)] dark:border-[#1d9bf0] dark:bg-[#192734] dark:text-[#8b98a5] dark:shadow-none">
         <Search className="ml-3.5" size={23} aria-hidden="true" />
         <input
           className="h-full min-w-0 flex-1 border-0 bg-transparent px-2.5 pr-2.5 pl-3.5 text-[21px] tracking-normal text-[#111827] outline-0 placeholder:text-[#8b95a4] dark:text-[#f7f9f9] dark:placeholder:text-[#536471] max-[680px]:text-lg"
@@ -608,7 +616,7 @@ function SearchForm({ query, setQuery, onSubmit, loading }) {
         ) : null}
       </div>
       <button
-        className="inline-flex h-14 min-w-[118px] cursor-pointer items-center justify-center gap-2 rounded-[7px] border-0 bg-linear-to-b from-[#0b8d98] to-[#087580] text-xl font-bold text-white shadow-[0_10px_24px_rgba(7,129,140,0.22)] disabled:cursor-wait disabled:opacity-80 dark:from-[#1d9bf0] dark:to-[#1a8cd8] dark:shadow-[0_12px_28px_rgba(29,155,240,0.2)] max-[980px]:w-full"
+        className="inline-flex h-14 min-w-[118px] cursor-pointer items-center justify-center gap-2 rounded-[7px] border-0 bg-linear-to-b from-[#1d9bf0] to-[#1a8cd8] text-xl font-bold text-white shadow-[0_10px_24px_rgba(29,155,240,0.22)] disabled:cursor-wait disabled:opacity-80 dark:from-[#1d9bf0] dark:to-[#1a8cd8] dark:shadow-[0_12px_28px_rgba(29,155,240,0.2)] max-[980px]:w-full"
         disabled={loading}
         type="submit"
       >
@@ -801,7 +809,7 @@ function RecentsTable({ recents, onSelect, onClear }) {
         <h2 className="m-0 text-[23px] font-extrabold text-[#111827] dark:text-[#f7f9f9]">Recently searched</h2>
         {recents.length ? (
           <button
-            className="cursor-pointer border-0 bg-transparent text-[15px] font-[650] text-[#07818c] hover:text-[#00616c] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] dark:text-[#1d9bf0] dark:hover:text-[#8ecdf8]"
+            className="cursor-pointer border-0 bg-transparent text-[15px] font-[650] text-[#1d9bf0] hover:text-[#0f6fb8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] dark:text-[#1d9bf0] dark:hover:text-[#8ecdf8]"
             type="button"
             onClick={onClear}
           >
@@ -887,7 +895,7 @@ function RecentsTable({ recents, onSelect, onClear }) {
       )}
       {recents.length > 5 ? (
         <button
-          className="mx-auto mt-6 block cursor-pointer border-0 bg-transparent text-[17px] font-[650] text-[#07818c] hover:text-[#00616c] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] dark:text-[#1d9bf0] dark:hover:text-[#8ecdf8]"
+          className="mx-auto mt-6 block cursor-pointer border-0 bg-transparent text-[17px] font-[650] text-[#1d9bf0] hover:text-[#0f6fb8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] dark:text-[#1d9bf0] dark:hover:text-[#8ecdf8]"
           type="button"
         >
           View all history
@@ -1001,7 +1009,7 @@ export default function App() {
   const visibleResult = useMemo(() => result ?? sampleResult, [result]);
 
   return (
-    <div className="min-h-screen min-w-80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(251,252,253,0.9)),radial-gradient(circle_at_25%_0%,rgba(7,129,140,0.05),transparent_32%)] font-sans text-[#111827] antialiased dark:bg-[linear-gradient(180deg,rgba(21,32,43,0.98),rgba(21,32,43,0.94)),radial-gradient(circle_at_25%_0%,rgba(29,155,240,0.10),transparent_34%)] dark:text-[#f7f9f9]">
+    <div className="min-h-screen min-w-80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(251,252,253,0.9)),radial-gradient(circle_at_25%_0%,rgba(29,155,240,0.07),transparent_32%)] font-sans text-[#111827] antialiased dark:bg-[linear-gradient(180deg,rgba(21,32,43,0.98),rgba(21,32,43,0.94)),radial-gradient(circle_at_25%_0%,rgba(29,155,240,0.10),transparent_34%)] dark:text-[#f7f9f9]">
       <Header
         theme={theme}
         onToggleTheme={() => {
