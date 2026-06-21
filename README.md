@@ -49,6 +49,14 @@ artifact directly, computes raw, gzip, and Brotli byte counts in the browser,
 and stores resolved measurements locally with IndexedDB, falling back to
 localStorage when needed.
 
+Dashboard URLs are shareable. Use `pkg` for the package spec and the same
+UNPKG options used by the builder, for example:
+
+```text
+https://patrickjs.github.io/package-size/?pkg=react&conditions=browser&target=es2022
+https://patrickjs.github.io/package-size/?pkg=react&subpath=jsx-runtime&conditions=browser,react-server&target=es2020&meta
+```
+
 ## Local Development
 
 ```bash

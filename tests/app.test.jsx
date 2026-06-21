@@ -65,6 +65,7 @@ function mockSizeApi() {
 }
 
 beforeEach(() => {
+  window.history.replaceState(null, "", "/");
   window.localStorage.clear();
   mockSizeApi();
 });
@@ -88,18 +89,21 @@ describe("App", () => {
     expect(window.localStorage.getItem("package-size.recent-searches.v2")).toContain("react@19.2.7");
   });
 
-  it("uses URL builder options when searching", async () => {
+  it("uses URL builder options when resolving", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await screen.findByText("19.2.7");
+    await user.click(screen.getByRole("button", { name: "URL builder" }));
     await user.selectOptions(screen.getByLabelText("Target"), "es2020");
+    await user.selectOptions(screen.getByLabelText("Bundle mode"), "standalone");
+    await user.click(screen.getByLabelText("Development"));
     await user.click(screen.getByLabelText("Metadata"));
 
-    const input = screen.getByLabelText("Package name");
+    const input = screen.getByLabelText("Package spec");
     await user.clear(input);
     await user.type(input, "zod");
-    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.click(screen.getByRole("button", { name: "Resolve package", hidden: true }));
 
     await waitFor(() => {
       expect(screen.getAllByText("4.4.3").length).toBeGreaterThan(0);
@@ -108,6 +112,38 @@ describe("App", () => {
     const parsed = new URL(lastUrl, "http://localhost");
     expect(parsed.searchParams.get("pkg")).toBe("zod");
     expect(parsed.searchParams.get("target")).toBe("es2020");
+    expect(parsed.searchParams.get("meta")).toBe("true");
+    expect(parsed.searchParams.get("env")).toBe("development");
+    expect(parsed.searchParams.get("bundle")).toBe("standalone");
+    const dashboardParams = new URL(window.location.href).searchParams;
+    expect(dashboardParams.get("pkg")).toBe("zod");
+    expect(dashboardParams.get("target")).toBe("es2020");
+    expect(dashboardParams.get("conditions")).toBe("browser");
+    expect(dashboardParams.has("meta")).toBe(true);
+    expect(dashboardParams.has("dev")).toBe(true);
+    expect(dashboardParams.has("standalone")).toBe(true);
+    expect(dashboardParams.has("env")).toBe(false);
+    expect(dashboardParams.has("bundle")).toBe(false);
+    expect(screen.getByText("Resolved metadata")).toBeInTheDocument();
+  });
+
+  it("loads the shown package and UNPKG options from dashboard query params", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/?pkg=zod&conditions=browser,react-server&target=es2020&meta",
+    );
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("4.4.3").length).toBeGreaterThan(0);
+    });
+    const firstUrl = global.fetch.mock.calls[0][0];
+    const parsed = new URL(firstUrl, "http://localhost");
+    expect(parsed.searchParams.get("pkg")).toBe("zod");
+    expect(parsed.searchParams.get("target")).toBe("es2020");
+    expect(parsed.searchParams.get("conditions")).toBe("browser,react-server");
     expect(parsed.searchParams.get("meta")).toBe("true");
     expect(screen.getByText("Resolved metadata")).toBeInTheDocument();
   });
@@ -145,7 +181,7 @@ describe("App", () => {
     render(<App />);
 
     await screen.findByText("19.2.7");
-    await user.click(screen.getByRole("button", { name: "Search zod@4.4.3" }));
+    await user.click(screen.getAllByRole("button", { name: "Search zod@4.4.3" })[0]);
 
     await waitFor(() => {
       expect(screen.getAllByText("4.4.3").length).toBeGreaterThan(0);

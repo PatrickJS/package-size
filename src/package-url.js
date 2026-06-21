@@ -165,6 +165,43 @@ export function packageSpecFromResolved(packageName, version) {
   return version ? `${packageName}@${version}` : packageName;
 }
 
+function formatSearchParams(params) {
+  return params.toString().replace(/=(?=&|$)/g, "").replace(/%2C/g, ",");
+}
+
+export function buildUnpkgSearchParams(sizeOptions = {}) {
+  const options = normalizeSizeOptions(sizeOptions);
+  const params = new URLSearchParams();
+
+  if (options.conditions.length) {
+    params.set("conditions", options.conditions.join(","));
+  }
+  if (options.target) {
+    params.set("target", options.target);
+  }
+  if (options.env === "development") {
+    params.set("dev", "");
+  }
+  if (options.bundle !== "default") {
+    params.set(options.bundle, "");
+  }
+  if (options.min) {
+    params.set("min", "");
+  }
+  if (options.sourcemap) {
+    params.set("sourcemap", "");
+  }
+  if (options.meta) {
+    params.set("meta", "");
+  }
+
+  return params;
+}
+
+export function buildUnpkgQueryString(sizeOptions = {}) {
+  return formatSearchParams(buildUnpkgSearchParams(sizeOptions));
+}
+
 export function parseResolvedPackage(resolvedUrl, fallback) {
   try {
     const url = new URL(resolvedUrl);
@@ -211,30 +248,13 @@ export function buildEsmUnpkgUrl(packageSpec, sizeOptions = {}) {
     ? `/${options.subpath.split("/").map((segment) => encodeURIComponent(segment)).join("/")}`
     : "";
   const url = new URL(`${SOURCE_ORIGIN}/${encodedPackage}${encodedVersion}${subpath}`);
+  const query = buildUnpkgQueryString(options);
 
-  if (options.conditions.length) {
-    url.searchParams.set("conditions", options.conditions.join(","));
-  }
-  if (options.target) {
-    url.searchParams.set("target", options.target);
-  }
-  if (options.env === "development") {
-    url.searchParams.set("dev", "");
-  }
-  if (options.bundle !== "default") {
-    url.searchParams.set(options.bundle, "");
-  }
-  if (options.min) {
-    url.searchParams.set("min", "");
-  }
-  if (options.sourcemap) {
-    url.searchParams.set("sourcemap", "");
-  }
-  if (options.meta) {
-    url.searchParams.set("meta", "");
+  if (query) {
+    url.search = query;
   }
 
-  return url.toString().replace(/=(?=&|$)/g, "").replace(/%2C/g, ",");
+  return url.toString();
 }
 
 export function sizeOptionsFromSearchParams(searchParams) {

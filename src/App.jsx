@@ -5,6 +5,7 @@ import {
   Code2,
   Database,
   GitBranch,
+  Link2,
   Loader2,
   Moon,
   PackageSearch,
@@ -18,9 +19,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildEsmUnpkgUrl,
   buildSizeApiSearchParams,
+  buildUnpkgSearchParams,
   DEFAULT_SIZE_OPTIONS,
   normalizeSizeOptions,
   packageSpecFromResolved,
+  sizeOptionsFromSearchParams,
 } from "./package-url.js";
 import { measurePackageSizeInBrowser } from "./browser-measure.js";
 
@@ -28,6 +31,8 @@ const RECENTS_KEY = "package-size.recent-searches.v2";
 const LEGACY_RECENTS_KEY = "package-size.recent-searches.v1";
 const THEME_KEY = "package-size.theme.v1";
 const MAX_RECENTS = 8;
+const DEFAULT_QUERY = "react";
+const URL_BUILDER_POPOVER_ID = "url-builder-popover";
 
 const conditionOptions = ["browser", "react-server", "worker"];
 
@@ -84,6 +89,62 @@ function defaultSizeOptions() {
     ...DEFAULT_SIZE_OPTIONS,
     conditions: [...DEFAULT_SIZE_OPTIONS.conditions],
   };
+}
+
+function buildDashboardSearchParams(packageSpec, sizeOptions) {
+  const normalizedOptions = normalizeSizeOptions(sizeOptions);
+  const params = new URLSearchParams();
+  params.set("pkg", String(packageSpec ?? "").trim() || DEFAULT_QUERY);
+
+  if (normalizedOptions.subpath) {
+    params.set("subpath", normalizedOptions.subpath);
+  }
+  for (const [key, value] of buildUnpkgSearchParams(normalizedOptions)) {
+    params.set(key, value);
+  }
+
+  return params.toString().replace(/=(?=&|$)/g, "").replace(/%2C/g, ",");
+}
+
+function readDashboardStateFromLocation() {
+  if (typeof window === "undefined") {
+    return {
+      query: DEFAULT_QUERY,
+      sizeOptions: defaultSizeOptions(),
+    };
+  }
+
+  const searchParams = new URLSearchParams(window.location.search);
+  const query = (searchParams.get("pkg") ?? searchParams.get("package") ?? DEFAULT_QUERY).trim() || DEFAULT_QUERY;
+
+  try {
+    return {
+      query,
+      sizeOptions: sizeOptionsFromSearchParams(searchParams),
+    };
+  } catch {
+    return {
+      query,
+      sizeOptions: defaultSizeOptions(),
+    };
+  }
+}
+
+function writeDashboardStateToLocation(packageSpec, sizeOptions, mode = "push") {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const search = buildDashboardSearchParams(packageSpec, sizeOptions);
+  const nextUrl = `${window.location.pathname}?${search}${window.location.hash}`;
+  const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+
+  if (nextUrl === currentUrl) {
+    return;
+  }
+
+  const method = mode === "replace" ? "replaceState" : "pushState";
+  window.history[method](null, "", nextUrl);
 }
 
 function formatKiB(bytes) {
@@ -263,7 +324,7 @@ function Header({ theme, onToggleTheme }) {
   );
 }
 
-function Homepage({ query, sizeOptions, setSizeOptions, previewUrl }) {
+function Homepage({ previewUrl }) {
   return (
     <section
       className="mb-8 grid grid-cols-[minmax(0,0.9fr)_minmax(380px,0.8fr)] gap-7 border-b border-[#d9e0e7] pb-8 dark:border-[#38444d] max-[980px]:grid-cols-1"
@@ -285,12 +346,27 @@ function Homepage({ query, sizeOptions, setSizeOptions, previewUrl }) {
           <span>Resolved versions are pinned in recents so later runs use the stable URL UNPKG selected.</span>
         </div>
       </div>
-      <UrlBuilder
-        query={query}
-        sizeOptions={sizeOptions}
-        setSizeOptions={setSizeOptions}
-        previewUrl={previewUrl}
-      />
+      <aside className="rounded-[7px] border border-[#cbd4de] bg-white p-5 shadow-[0_8px_22px_rgba(15,23,42,0.05)] dark:border-[#38444d] dark:bg-[#192734] dark:shadow-none">
+        <div className="mb-4 flex items-center gap-2.5 text-[15px] font-bold text-[#07818c] dark:text-[#8ecdf8]">
+          <Link2 size={18} aria-hidden="true" />
+          <span>Shareable resolver URL</span>
+        </div>
+        <h3 className="m-0 text-[22px] font-extrabold text-[#111827] dark:text-[#f7f9f9]">Build a UNPKG variant</h3>
+        <p className="m-0 mt-2 text-[15px] leading-[1.4] text-[#5b6678] dark:text-[#8b98a5]">
+          Open the builder to set package, subpath, target, export conditions, metadata, and bundle flags. Resolving updates the dashboard URL with the package and UNPKG query parameters.
+        </p>
+        <code className="mt-4 block max-h-[88px] overflow-auto wrap-anywhere rounded-[7px] border border-[#e1e7ed] bg-[#f7fafc] px-3 py-2.5 text-[13px] leading-[1.35] text-[#111827] dark:border-[#38444d] dark:bg-[#15202b] dark:text-[#f7f9f9]">
+          {previewUrl || "Enter a valid package spec to preview the URL."}
+        </code>
+        <button
+          className="mt-4 inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-[7px] border-0 bg-linear-to-b from-[#0b8d98] to-[#087580] px-4 text-[16px] font-bold text-white shadow-[0_10px_24px_rgba(7,129,140,0.18)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] dark:from-[#1d9bf0] dark:to-[#1a8cd8] dark:shadow-[0_12px_28px_rgba(29,155,240,0.18)]"
+          type="button"
+          popovertarget={URL_BUILDER_POPOVER_ID}
+        >
+          <Link2 size={18} />
+          URL builder
+        </button>
+      </aside>
     </section>
   );
 }
@@ -309,7 +385,17 @@ function CommandBlock({ icon, title, command }) {
   );
 }
 
-function UrlBuilder({ sizeOptions, setSizeOptions, previewUrl }) {
+function UrlBuilderPopover({
+  error,
+  loading,
+  onResolve,
+  previewUrl,
+  query,
+  setQuery,
+  setSizeOptions,
+  sizeOptions,
+}) {
+  const popoverRef = useRef(null);
   const setOption = (key, value) => {
     setSizeOptions((current) => ({
       ...current,
@@ -334,94 +420,149 @@ function UrlBuilder({ sizeOptions, setSizeOptions, previewUrl }) {
   const copyUrl = () => {
     navigator.clipboard?.writeText(previewUrl).catch(() => {});
   };
+  const resolveFromBuilder = async () => {
+    const nextResult = await onResolve(query, sizeOptions);
+    if (nextResult) {
+      popoverRef.current?.hidePopover?.();
+    }
+  };
 
   return (
-    <aside className="rounded-[7px] border border-[#cbd4de] bg-white p-5 shadow-[0_8px_22px_rgba(15,23,42,0.05)] dark:border-[#38444d] dark:bg-[#192734] dark:shadow-none">
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
-          <h3 className="m-0 text-[22px] font-extrabold text-[#111827] dark:text-[#f7f9f9]">URL builder</h3>
-          <p className="m-0 mt-1 text-[15px] leading-[1.35] text-[#5b6678] dark:text-[#8b98a5]">
-            Construct the esm.unpkg.com variant before measuring it.
-          </p>
-        </div>
-        <button className={iconButtonClass} type="button" onClick={copyUrl} aria-label="Copy constructed URL">
-          <Clipboard size={19} />
-        </button>
-      </div>
-
-      <div className="grid gap-4">
-        <label className="grid gap-1.5 text-sm font-bold text-[#354153] dark:text-[#d6dde4]">
-          Subpath
-          <input
-            className={fieldClass}
-            value={sizeOptions.subpath}
-            onChange={(event) => setOption("subpath", event.target.value)}
-            placeholder="client or dist/index.js"
-          />
-        </label>
-        <label className="grid gap-1.5 text-sm font-bold text-[#354153] dark:text-[#d6dde4]">
-          Target
-          <select
-            className={fieldClass}
-            value={sizeOptions.target}
-            onChange={(event) => setOption("target", event.target.value)}
-          >
-            {["es2018", "es2020", "es2022", "es2024", "esnext", "node", "deno"].map((target) => (
-              <option key={target} value={target}>
-                {target}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div>
-          <span className="mb-2 block text-sm font-bold text-[#354153] dark:text-[#d6dde4]">Export conditions</span>
-          <div className="grid grid-cols-3 gap-2 max-[520px]:grid-cols-1">
-            {conditionOptions.map((condition) => (
-              <CheckboxControl
-                key={condition}
-                label={condition}
-                checked={sizeOptions.conditions.includes(condition)}
-                onChange={() => toggleCondition(condition)}
-              />
-            ))}
+    <div
+      className="url-builder-popover"
+      id={URL_BUILDER_POPOVER_ID}
+      popover="auto"
+      ref={popoverRef}
+      role="dialog"
+      aria-labelledby="url-builder-title"
+    >
+      <div className="max-h-[calc(100vh_-_36px)] overflow-auto rounded-[7px] border border-[#cbd4de] bg-white p-5 shadow-[0_26px_70px_rgba(15,23,42,0.28)] dark:border-[#38444d] dark:bg-[#192734]">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h3 id="url-builder-title" className="m-0 text-[24px] font-extrabold text-[#111827] dark:text-[#f7f9f9]">
+              URL builder
+            </h3>
+            <p className="m-0 mt-1 text-[15px] leading-[1.35] text-[#5b6678] dark:text-[#8b98a5]">
+              Construct and resolve the esm.unpkg.com variant, then view the measured size.
+            </p>
           </div>
-        </div>
-        <label className="grid gap-1.5 text-sm font-bold text-[#354153] dark:text-[#d6dde4]">
-          Bundle mode
-          <select
-            className={fieldClass}
-            value={sizeOptions.bundle}
-            onChange={(event) => setOption("bundle", event.target.value)}
+          <button
+            className={iconButtonClass}
+            type="button"
+            popovertarget={URL_BUILDER_POPOVER_ID}
+            popovertargetaction="hide"
+            aria-label="Close URL builder"
           >
-            <option value="default">Default</option>
-            <option value="bundle">Bundle</option>
-            <option value="standalone">Standalone</option>
-            <option value="no-bundle">No bundle</option>
-          </select>
-        </label>
-        <div className="grid grid-cols-2 gap-2 max-[520px]:grid-cols-1">
-          <CheckboxControl
-            label="Development"
-            checked={sizeOptions.env === "development"}
-            onChange={() => setOption("env", sizeOptions.env === "development" ? "production" : "development")}
-          />
-          <CheckboxControl label="Minify" checked={sizeOptions.min} onChange={() => setOption("min", !sizeOptions.min)} />
-          <CheckboxControl
-            label="Source map"
-            checked={sizeOptions.sourcemap}
-            onChange={() => setOption("sourcemap", !sizeOptions.sourcemap)}
-          />
-          <CheckboxControl
-            label="Metadata"
-            checked={sizeOptions.meta}
-            onChange={() => setOption("meta", !sizeOptions.meta)}
-          />
+            <X size={20} />
+          </button>
         </div>
-        <code className="block max-h-[88px] overflow-auto wrap-anywhere rounded-[7px] border border-[#e1e7ed] bg-[#f7fafc] px-3 py-2.5 text-[13px] leading-[1.35] text-[#111827] dark:border-[#38444d] dark:bg-[#15202b] dark:text-[#f7f9f9]">
-          {previewUrl || "Enter a valid package spec to preview the URL."}
-        </code>
+
+        <div className="grid gap-4">
+          <label className="grid gap-1.5 text-sm font-bold text-[#354153] dark:text-[#d6dde4]">
+            Package spec
+            <input
+              className={fieldClass}
+              autoCapitalize="none"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck="false"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="react or @scope/package@tag"
+            />
+          </label>
+          <label className="grid gap-1.5 text-sm font-bold text-[#354153] dark:text-[#d6dde4]">
+            Subpath
+            <input
+              className={fieldClass}
+              value={sizeOptions.subpath}
+              onChange={(event) => setOption("subpath", event.target.value)}
+              placeholder="client or dist/index.js"
+            />
+          </label>
+          <label className="grid gap-1.5 text-sm font-bold text-[#354153] dark:text-[#d6dde4]">
+            Target
+            <select
+              className={fieldClass}
+              value={sizeOptions.target}
+              onChange={(event) => setOption("target", event.target.value)}
+            >
+              {["es2018", "es2020", "es2022", "es2024", "esnext", "node", "deno"].map((target) => (
+                <option key={target} value={target}>
+                  {target}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div>
+            <span className="mb-2 block text-sm font-bold text-[#354153] dark:text-[#d6dde4]">Export conditions</span>
+            <div className="grid grid-cols-3 gap-2 max-[520px]:grid-cols-1">
+              {conditionOptions.map((condition) => (
+                <CheckboxControl
+                  key={condition}
+                  label={condition}
+                  checked={sizeOptions.conditions.includes(condition)}
+                  onChange={() => toggleCondition(condition)}
+                />
+              ))}
+            </div>
+          </div>
+          <label className="grid gap-1.5 text-sm font-bold text-[#354153] dark:text-[#d6dde4]">
+            Bundle mode
+            <select
+              className={fieldClass}
+              value={sizeOptions.bundle}
+              onChange={(event) => setOption("bundle", event.target.value)}
+            >
+              <option value="default">Default</option>
+              <option value="bundle">Bundle</option>
+              <option value="standalone">Standalone</option>
+              <option value="no-bundle">No bundle</option>
+            </select>
+          </label>
+          <div className="grid grid-cols-2 gap-2 max-[520px]:grid-cols-1">
+            <CheckboxControl
+              label="Development"
+              checked={sizeOptions.env === "development"}
+              onChange={() => setOption("env", sizeOptions.env === "development" ? "production" : "development")}
+            />
+            <CheckboxControl label="Minify" checked={sizeOptions.min} onChange={() => setOption("min", !sizeOptions.min)} />
+            <CheckboxControl
+              label="Source map"
+              checked={sizeOptions.sourcemap}
+              onChange={() => setOption("sourcemap", !sizeOptions.sourcemap)}
+            />
+            <CheckboxControl
+              label="Metadata"
+              checked={sizeOptions.meta}
+              onChange={() => setOption("meta", !sizeOptions.meta)}
+            />
+          </div>
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 max-[520px]:grid-cols-1">
+            <code className="block max-h-[92px] overflow-auto wrap-anywhere rounded-[7px] border border-[#e1e7ed] bg-[#f7fafc] px-3 py-2.5 text-[13px] leading-[1.35] text-[#111827] dark:border-[#38444d] dark:bg-[#15202b] dark:text-[#f7f9f9]">
+              {previewUrl || "Enter a valid package spec to preview the URL."}
+            </code>
+            <button className={iconButtonClass} type="button" onClick={copyUrl} aria-label="Copy constructed URL">
+              <Clipboard size={19} />
+            </button>
+          </div>
+          {error ? (
+            <p className="m-0 rounded-[7px] border border-[#fac9be] bg-[#fff4f1] px-3 py-2 text-[14px] font-semibold text-[#a43d28] dark:border-[#8c3d32] dark:bg-[#3a2526] dark:text-[#ffb4a8]">
+              {error}
+            </p>
+          ) : null}
+          <button
+            className="inline-flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-[7px] border-0 bg-linear-to-b from-[#0b8d98] to-[#087580] text-[18px] font-bold text-white shadow-[0_10px_24px_rgba(7,129,140,0.20)] disabled:cursor-wait disabled:opacity-80 dark:from-[#1d9bf0] dark:to-[#1a8cd8] dark:shadow-[0_12px_28px_rgba(29,155,240,0.18)]"
+            type="button"
+            disabled={loading}
+            onClick={resolveFromBuilder}
+          >
+            {loading ? <Loader2 className="animate-spin" size={20} /> : null}
+            Resolve package
+          </button>
+        </div>
       </div>
-    </aside>
+    </div>
   );
 }
 
@@ -757,8 +898,9 @@ function RecentsTable({ recents, onSelect, onClear }) {
 }
 
 export default function App() {
-  const [query, setQuery] = useState("react");
-  const [sizeOptions, setSizeOptions] = useState(defaultSizeOptions);
+  const [initialDashboardState] = useState(readDashboardStateFromLocation);
+  const [query, setQuery] = useState(initialDashboardState.query);
+  const [sizeOptions, setSizeOptions] = useState(initialDashboardState.sizeOptions);
   const [result, setResult] = useState(sampleResult);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -798,11 +940,11 @@ export default function App() {
   }, []);
 
   const runSearch = useCallback(
-    async (nextQuery = query, nextOptions = sizeOptions) => {
+    async (nextQuery = query, nextOptions = sizeOptions, options = {}) => {
       const trimmed = nextQuery.trim();
       if (!trimmed) {
         setError("Enter a package name.");
-        return;
+        return null;
       }
 
       let normalizedOptions;
@@ -810,7 +952,7 @@ export default function App() {
         normalizedOptions = normalizeSizeOptions(nextOptions);
       } catch (nextError) {
         setError(nextError.message);
-        return;
+        return null;
       }
 
       setQuery(trimmed);
@@ -822,8 +964,13 @@ export default function App() {
         const nextResult = await fetchPackageSize(trimmed, normalizedOptions);
         setResult(nextResult);
         saveRecent(nextResult);
+        if (options.history !== false) {
+          writeDashboardStateToLocation(trimmed, normalizedOptions, options.history ?? "push");
+        }
+        return nextResult;
       } catch (nextError) {
         setError(nextError.message);
+        return null;
       } finally {
         setLoading(false);
       }
@@ -836,7 +983,19 @@ export default function App() {
       return;
     }
     didAutoMeasure.current = true;
-    runSearch("react", defaultSizeOptions());
+    runSearch(initialDashboardState.query, initialDashboardState.sizeOptions, { history: "replace" });
+  }, [initialDashboardState, runSearch]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const nextState = readDashboardStateFromLocation();
+      runSearch(nextState.query, nextState.sizeOptions, { history: false });
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
   }, [runSearch]);
 
   const visibleResult = useMemo(() => result ?? sampleResult, [result]);
@@ -851,9 +1010,6 @@ export default function App() {
       />
       <main className="mx-auto w-[calc(100vw_-_64px)] max-w-[1376px] py-[38px] pb-14 max-[980px]:w-[calc(100%_-_32px)] max-[980px]:max-w-[760px] max-[980px]:pt-6">
         <Homepage
-          query={query}
-          sizeOptions={sizeOptions}
-          setSizeOptions={setSizeOptions}
           previewUrl={previewUrl}
         />
         <SearchForm
@@ -866,7 +1022,11 @@ export default function App() {
           }}
         />
         <ErrorMessage message={error} />
-        <ResultHeader result={visibleResult} loading={loading} onRefresh={() => runSearch(visibleResult.query, visibleResult.options)} />
+        <ResultHeader
+          result={visibleResult}
+          loading={loading}
+          onRefresh={() => runSearch(visibleResult.query, visibleResult.options, { history: "replace" })}
+        />
         <MetricsPanel result={visibleResult} />
         <RecentsTable
           recents={recents}
@@ -877,6 +1037,16 @@ export default function App() {
           }}
         />
       </main>
+      <UrlBuilderPopover
+        error={error}
+        loading={loading}
+        onResolve={(nextQuery, nextOptions) => runSearch(nextQuery, nextOptions)}
+        previewUrl={previewUrl}
+        query={query}
+        setQuery={setQuery}
+        setSizeOptions={setSizeOptions}
+        sizeOptions={sizeOptions}
+      />
     </div>
   );
 }
