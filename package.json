@@ -9,7 +9,7 @@
   },
   "packageManager": "pnpm@9.15.4",
   "bin": {
-    "package-size": "./bin/package-size.js"
+    "package-size": "bin/package-size.js"
   },
   "repository": {
     "type": "git",
@@ -29,7 +29,7 @@
     "pipeline:pages": "async-pipeline run-task docs.site",
     "pipeline:publish": "async-pipeline run publish",
     "pipeline:publish-github": "async-pipeline run publish-github",
-    "pipeline:publish:github:main": "async-pipeline publish github main --package .",
+    "pipeline:publish:github:main": "async-pipeline publish github main --package . --namespace patrickjs",
     "pipeline:publish:github:release": "async-pipeline publish github release --package .",
     "pipeline:publish:npm": "async-pipeline publish npm --package .",
     "pipeline:release-doctor": "async-pipeline run release-doctor",

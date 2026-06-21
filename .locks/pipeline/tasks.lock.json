@@ -75,7 +75,7 @@
         },
         {
           "name": "pipeline:publish:github:main",
-          "value": "async-pipeline publish github main --package ."
+          "value": "async-pipeline publish github main --package . --namespace patrickjs"
         },
         {
           "name": "pipeline:publish:github:release",
@@ -171,7 +171,7 @@
     },
     {
       "name": "pipeline:publish:github:main",
-      "value": "async-pipeline publish github main --package ."
+      "value": "async-pipeline publish github main --package . --namespace patrickjs"
     },
     {
       "name": "pipeline:publish:github:release",
@@ -206,6 +206,6 @@
       "value": "async-pipeline run verify"
     }
   ],
-  "hash": "sha256:1b70844c0b362decc6d57e963d6a2ad12f48cfe5d09298603eaf6d153614da1e",
-  "generatedAt": "2026-06-21T01:11:00.894Z"
+  "hash": "sha256:c34bc46d15e441238e4dc373f540e917e5cb7cbec078e4cf010f77955df33829",
+  "generatedAt": "2026-06-21T01:18:59.793Z"
 }

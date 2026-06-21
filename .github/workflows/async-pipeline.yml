@@ -413,13 +413,13 @@ jobs:
           CI: true
 
       - name: Plan main package preview
-        run: pnpm dlx github:async/release#v0.1.5 preview plan --package . --mode main --namespace "${{ github.repository_owner }}" --source-repository "${{ github.repository }}" --source-sha "${{ github.sha }}" --evidence-dir .async/release --json
+        run: pnpm dlx github:async/release#v0.1.5 preview plan --package . --mode main --namespace patrickjs --source-repository "${{ github.repository }}" --source-sha "${{ github.sha }}" --evidence-dir .async/release --json
 
       - name: Stage main package preview
-        run: pnpm dlx github:async/release#v0.1.5 preview stage --package . --mode main --namespace "${{ github.repository_owner }}" --source-repository "${{ github.repository }}" --source-sha "${{ github.sha }}" --evidence-dir .async/release --json --registry https://npm.pkg.github.com
+        run: pnpm dlx github:async/release#v0.1.5 preview stage --package . --mode main --namespace patrickjs --source-repository "${{ github.repository }}" --source-sha "${{ github.sha }}" --evidence-dir .async/release --json --registry https://npm.pkg.github.com
 
       - name: Inspect main package preview
-        run: pnpm dlx github:async/release#v0.1.5 preview inspect --package . --mode main --namespace "${{ github.repository_owner }}" --source-repository "${{ github.repository }}" --source-sha "${{ github.sha }}" --evidence-dir .async/release --json
+        run: pnpm dlx github:async/release#v0.1.5 preview inspect --package . --mode main --namespace patrickjs --source-repository "${{ github.repository }}" --source-sha "${{ github.sha }}" --evidence-dir .async/release --json
 
       - name: Publish main package preview
         id: async-main-package-preview
@@ -427,6 +427,7 @@ jobs:
         with:
           package-path: "."
           target-registry: "https://npm.pkg.github.com"
+          namespace: "patrickjs"
           mode: main
           comment: false
           token-env-name: "GITHUB_TOKEN"
@@ -437,7 +438,7 @@ jobs:
 
       - name: Verify main package preview
         if: steps.async-main-package-preview.outputs.package-spec != ''
-        run: pnpm dlx github:async/release#v0.1.5 preview doctor --package . --mode main --namespace "${{ github.repository_owner }}" --source-repository "${{ github.repository }}" --source-sha "${{ github.sha }}" --evidence-dir .async/release --json --registry https://npm.pkg.github.com --network live
+        run: pnpm dlx github:async/release#v0.1.5 preview doctor --package . --mode main --namespace patrickjs --source-repository "${{ github.repository }}" --source-sha "${{ github.sha }}" --evidence-dir .async/release --json --registry https://npm.pkg.github.com --network live
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -635,13 +636,13 @@ jobs:
           trust: read-write
 
       - name: Plan PR package preview
-        run: pnpm dlx github:async/release#v0.1.5 preview plan --package . --mode pr --namespace "${{ github.repository_owner }}" --source-repository "${{ github.repository }}" --source-sha "${{ github.sha }}" --evidence-dir .async/release --json --pr-number "${{ github.event.pull_request.number }}" --head-sha "${{ github.event.pull_request.head.sha }}"
+        run: pnpm dlx github:async/release#v0.1.5 preview plan --package . --mode pr --namespace patrickjs --source-repository "${{ github.repository }}" --source-sha "${{ github.sha }}" --evidence-dir .async/release --json --pr-number "${{ github.event.pull_request.number }}" --head-sha "${{ github.event.pull_request.head.sha }}"
 
       - name: Stage PR package preview
-        run: pnpm dlx github:async/release#v0.1.5 preview stage --package . --mode pr --namespace "${{ github.repository_owner }}" --source-repository "${{ github.repository }}" --source-sha "${{ github.sha }}" --evidence-dir .async/release --json --registry https://npm.pkg.github.com --pr-number "${{ github.event.pull_request.number }}" --head-sha "${{ github.event.pull_request.head.sha }}"
+        run: pnpm dlx github:async/release#v0.1.5 preview stage --package . --mode pr --namespace patrickjs --source-repository "${{ github.repository }}" --source-sha "${{ github.sha }}" --evidence-dir .async/release --json --registry https://npm.pkg.github.com --pr-number "${{ github.event.pull_request.number }}" --head-sha "${{ github.event.pull_request.head.sha }}"
 
       - name: Inspect PR package preview
-        run: pnpm dlx github:async/release#v0.1.5 preview inspect --package . --mode pr --namespace "${{ github.repository_owner }}" --source-repository "${{ github.repository }}" --source-sha "${{ github.sha }}" --evidence-dir .async/release --json --pr-number "${{ github.event.pull_request.number }}" --head-sha "${{ github.event.pull_request.head.sha }}"
+        run: pnpm dlx github:async/release#v0.1.5 preview inspect --package . --mode pr --namespace patrickjs --source-repository "${{ github.repository }}" --source-sha "${{ github.sha }}" --evidence-dir .async/release --json --pr-number "${{ github.event.pull_request.number }}" --head-sha "${{ github.event.pull_request.head.sha }}"
 
       - name: Publish package preview
         id: async-package-preview
@@ -649,6 +650,7 @@ jobs:
         with:
           package-path: "."
           target-registry: "https://npm.pkg.github.com"
+          namespace: "patrickjs"
           mode: pr
           comment: true
           token-env-name: "GITHUB_TOKEN"
@@ -659,7 +661,7 @@ jobs:
 
       - name: Verify PR package preview
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && steps.async-package-preview.outputs.package-spec != ''
-        run: pnpm dlx github:async/release#v0.1.5 preview doctor --package . --mode pr --namespace "${{ github.repository_owner }}" --source-repository "${{ github.repository }}" --source-sha "${{ github.sha }}" --evidence-dir .async/release --json --registry https://npm.pkg.github.com --network live --pr-number "${{ github.event.pull_request.number }}" --head-sha "${{ github.event.pull_request.head.sha }}"
+        run: pnpm dlx github:async/release#v0.1.5 preview doctor --package . --mode pr --namespace patrickjs --source-repository "${{ github.repository }}" --source-sha "${{ github.sha }}" --evidence-dir .async/release --json --registry https://npm.pkg.github.com --network live --pr-number "${{ github.event.pull_request.number }}" --head-sha "${{ github.event.pull_request.head.sha }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

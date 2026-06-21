@@ -27,7 +27,11 @@ export default definePipeline({
     github: {
       nodeVersion: 24,
       cache: true,
-      packagePreviews: true,
+      packagePreviews: {
+        package: ".",
+        target: "pack",
+        namespace: "patrickjs",
+      },
       pages: { target: "docs.site" },
     },
     tasks: {
@@ -42,7 +46,7 @@ export default definePipeline({
         pages: "run-task docs.site",
         publish: "run publish",
         "publish-github": "run publish-github",
-        "publish:github:main": "publish github main --package .",
+        "publish:github:main": "publish github main --package . --namespace patrickjs",
         "publish:github:release": "publish github release --package .",
         "publish:npm": "publish npm --package .",
         "release-doctor": "run release-doctor",
@@ -105,7 +109,7 @@ export default definePipeline({
       dependsOn: ["pack"],
       inputs: ["source"],
       cache: false,
-      run: sh`pnpm async-pipeline publish github main --package .`,
+      run: sh`pnpm async-pipeline publish github main --package . --namespace patrickjs`,
     }),
     "release-ensure": task({
       description: "Create or verify the release tag and GitHub Release before package publishing.",
