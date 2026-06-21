@@ -27,18 +27,14 @@ export default definePipeline({
     github: {
       nodeVersion: 24,
       cache: true,
-      packagePreviews: {
-        package: ".",
-        target: "pack",
-        namespace: "patrickjs",
-      },
+      packagePreviews: false,
       pages: { target: "docs.site" },
     },
     tasks: {
       prefix: "pipeline",
       runners: ["package"],
       targets: [{ package: "@patrickjs/package-size" }],
-      jobs: ["publish", "publish-github", "release-doctor", "snapshot", "verify"],
+      jobs: ["publish", "publish-github", "release-doctor", "verify"],
       tasks: ["build", "docs.site", "pack", "test"],
       scripts: {
         "github:check": "github check",
@@ -46,7 +42,6 @@ export default definePipeline({
         pages: "run-task docs.site",
         publish: "run publish",
         "publish-github": "run publish-github",
-        "publish:github:main": "publish github main --package . --namespace patrickjs",
         "publish:github:release": "publish github release --package .",
         "publish:npm": "publish npm --package .",
         "release-doctor": "run release-doctor",
@@ -104,13 +99,6 @@ export default definePipeline({
       cache: false,
       run: sh`pnpm run pack:check`,
     }),
-    snapshot: task({
-      description: "Publish an immutable main-branch snapshot to GitHub Packages.",
-      dependsOn: ["pack"],
-      inputs: ["source"],
-      cache: false,
-      run: sh`pnpm async-pipeline publish github main --package . --namespace patrickjs`,
-    }),
     "release-ensure": task({
       description: "Create or verify the release tag and GitHub Release before package publishing.",
       dependsOn: ["pack"],
@@ -147,19 +135,6 @@ export default definePipeline({
     verify: job({
       target: ["pack", "docs.site"],
       trigger: ["pr", "main", "release"],
-    }),
-    snapshot: job({
-      target: "snapshot",
-      trigger: ["main"],
-      env: {
-        GITHUB_TOKEN: env.secret("GITHUB_TOKEN"),
-      },
-      github: {
-        permissions: {
-          contents: "write",
-          packages: "write",
-        },
-      },
     }),
     "publish-github": job({
       target: "publish-github",

@@ -3,8 +3,8 @@
   "generator": "@async/pipeline",
   "config": "pipeline.ts",
   "workflow": ".github/workflows/async-pipeline.yml",
-  "hash": "sha256:7e33ad2dcf29c1acd9c3a6021894358780b203d1312c2ac4aeaf35839b746d48",
-  "generatedAt": "2026-06-21T01:18:59.789Z",
+  "hash": "sha256:9de661e275976706e0ea08d794bfd2cd37a0729e489cc9f3147bca1c959b2d40",
+  "generatedAt": "2026-06-21T01:23:29.261Z",
   "actions": [
     {
       "id": "actions.checkout",
@@ -148,14 +148,7 @@
     }
   ],
   "triggers": {
-    "pull_request": {
-      "types": [
-        "opened",
-        "ready_for_review",
-        "reopened",
-        "synchronize"
-      ]
-    },
+    "pull_request": {},
     "push": {
       "branches": [
         "main"
@@ -248,28 +241,6 @@
       "if": "github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'release-doctor'"
     },
     {
-      "id": "snapshot",
-      "target": [
-        "snapshot"
-      ],
-      "trigger": [
-        "main"
-      ],
-      "env": {
-        "GITHUB_TOKEN": {
-          "kind": "async-pipeline.env.secret",
-          "name": "GITHUB_TOKEN"
-        }
-      },
-      "github": {
-        "permissions": {
-          "contents": "write",
-          "packages": "write"
-        }
-      },
-      "if": "github.event_name == 'push' && (github.ref == 'refs/heads/main')"
-    },
-    {
       "id": "verify",
       "target": [
         "pack",
@@ -304,11 +275,8 @@
     ]
   },
   "packagePreviews": {
-    "enabled": true,
-    "package": ".",
-    "target": "pack",
+    "enabled": false,
     "registry": "https://npm.pkg.github.com",
-    "namespace": "patrickjs",
     "tokenEnv": "GITHUB_TOKEN",
     "comment": true
   },

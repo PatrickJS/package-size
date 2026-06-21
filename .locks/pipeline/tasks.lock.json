@@ -30,10 +30,6 @@
           "value": "async-pipeline run release-doctor"
         },
         {
-          "name": "pipeline:snapshot",
-          "value": "async-pipeline run snapshot"
-        },
-        {
           "name": "pipeline:verify",
           "value": "async-pipeline run verify"
         },
@@ -72,10 +68,6 @@
         {
           "name": "pipeline:publish-github",
           "value": "async-pipeline run publish-github"
-        },
-        {
-          "name": "pipeline:publish:github:main",
-          "value": "async-pipeline publish github main --package . --namespace patrickjs"
         },
         {
           "name": "pipeline:publish:github:release",
@@ -126,10 +118,6 @@
       "value": "async-pipeline run release-doctor"
     },
     {
-      "name": "pipeline:snapshot",
-      "value": "async-pipeline run snapshot"
-    },
-    {
       "name": "pipeline:verify",
       "value": "async-pipeline run verify"
     },
@@ -170,10 +158,6 @@
       "value": "async-pipeline run publish-github"
     },
     {
-      "name": "pipeline:publish:github:main",
-      "value": "async-pipeline publish github main --package . --namespace patrickjs"
-    },
-    {
       "name": "pipeline:publish:github:release",
       "value": "async-pipeline publish github release --package ."
     },
@@ -206,6 +190,6 @@
       "value": "async-pipeline run verify"
     }
   ],
-  "hash": "sha256:c34bc46d15e441238e4dc373f540e917e5cb7cbec078e4cf010f77955df33829",
-  "generatedAt": "2026-06-21T01:18:59.793Z"
+  "hash": "sha256:b2d575629dd717ab44529d231352cee8e08fa8e9353d25bfe9c8b6dbf7fae052",
+  "generatedAt": "2026-06-21T01:23:29.265Z"
 }
