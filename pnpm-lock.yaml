@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@async/framework':
+        specifier: 0.12.2
+        version: 0.12.2
       '@async/json':
         specifier: ^0.4.0
         version: 0.4.0
@@ -74,6 +77,10 @@ packages:
 
   '@asamuzakjp/nwsapi@2.3.9':
     resolution: {integrity: sha512-n8GuYSrI9bF7FFZ/SjhwevlHc8xaVlb/7HmHelnc/PZXBD2ZR49NnN9sMMuDdEGPeeRQ5d0hqlSlEpgCX3Wl0Q==}
+
+  '@async/framework@0.12.2':
+    resolution: {integrity: sha512-YN2pG7OMPigXlBRrqUC1asZn3YZh2N3GJEm8Q/2EErlWZ7Oo1p+4XpQthDohiF+hcdgrBcmzgQV6VTmnrv1Srg==}
+    engines: {node: '>=24'}
 
   '@async/json@0.4.0':
     resolution: {integrity: sha512-gDC5mgusfR1GFZbpzOOHeFqlymB7IM+jRIBfkP9O87azKaMKhNZZ5b/gi64oBRm+tAkFcK2AgllLCn9C3xR9Vw==}
@@ -931,6 +938,8 @@ snapshots:
   '@asamuzakjp/generational-cache@1.0.1': {}
 
   '@asamuzakjp/nwsapi@2.3.9': {}
+
+  '@async/framework@0.12.2': {}
 
   '@async/json@0.4.0': {}
 

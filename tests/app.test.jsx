@@ -77,12 +77,15 @@ afterEach(() => {
 });
 
 describe("App", () => {
-  it("loads the homepage, default package, and v2 recents", async () => {
+  it("loads the measure page, default package, and v2 recents", async () => {
     render(<App />);
 
-    expect(screen.getByText("Measure browser-resolved npm artifacts from your machine.")).toBeInTheDocument();
-    expect(screen.getByText("package-size json react")).toBeInTheDocument();
-    expect(screen.getByText("package-size dashboard --open")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Package Size" })).toBeInTheDocument();
+    expect(screen.queryByText("UNPKG artifact checker")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Measure" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByLabelText("Package name")).toBeInTheDocument();
+    expect(screen.queryByText("Local JSON")).not.toBeInTheDocument();
+    expect(screen.queryByText("Shareable resolver URL")).not.toBeInTheDocument();
     expect(await screen.findByText("19.2.7")).toBeInTheDocument();
     const recentSection = screen.getByLabelText("Recently searched packages");
     expect(within(recentSection).getByText("react")).toBeInTheDocument();
@@ -93,6 +96,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await user.click(screen.getByRole("link", { name: "Tools" }));
     const summary = screen.getByText("Shareable resolver URL");
     const panel = summary.closest("details");
     expect(panel?.open).toBe(true);
@@ -109,6 +113,7 @@ describe("App", () => {
     render(<App />);
 
     await screen.findByText("19.2.7");
+    await user.click(screen.getByRole("link", { name: "Tools" }));
     await user.click(screen.getByRole("button", { name: "URL builder" }));
     await user.selectOptions(screen.getByLabelText("Target"), "es2020");
     await user.selectOptions(screen.getByLabelText("Bundle mode"), "standalone");
@@ -121,7 +126,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Resolve package", hidden: true }));
 
     await waitFor(() => {
-      expect(screen.getAllByText("4.4.3").length).toBeGreaterThan(0);
+      expect(global.fetch.mock.calls.at(-1)[0]).toContain("pkg=zod");
     });
     const lastUrl = global.fetch.mock.calls.at(-1)[0];
     const parsed = new URL(lastUrl, "http://localhost");
@@ -139,6 +144,10 @@ describe("App", () => {
     expect(dashboardParams.has("standalone")).toBe(true);
     expect(dashboardParams.has("env")).toBe(false);
     expect(dashboardParams.has("bundle")).toBe(false);
+    await user.click(screen.getByRole("link", { name: "Measure" }));
+    await waitFor(() => {
+      expect(screen.getAllByText("4.4.3").length).toBeGreaterThan(0);
+    });
     expect(screen.getByText("Resolved metadata")).toBeInTheDocument();
   });
 

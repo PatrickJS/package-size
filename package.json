@@ -57,6 +57,7 @@
     "access": "public"
   },
   "dependencies": {
+    "@async/framework": "0.12.2",
     "@async/json": "^0.4.0",
     "brotli-wasm": "3.0.1",
     "lucide-react": "1.21.0",

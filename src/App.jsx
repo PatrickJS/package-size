@@ -1,10 +1,16 @@
 import {
+  createRouteRegistry,
+  createRouter,
+  defineRoute,
+} from "@async/framework/browser";
+import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Clipboard,
   Code2,
   Database,
+  Gauge,
   GitBranch,
   Link2,
   Loader2,
@@ -36,6 +42,11 @@ const DEFAULT_QUERY = "react";
 const URL_BUILDER_POPOVER_ID = "url-builder-popover";
 
 const conditionOptions = ["browser", "react-server", "worker"];
+const pageRoutes = createRouteRegistry({
+  "/": defineRoute({ render: "none", meta: { page: "measure" } }),
+  "/tools": defineRoute({ render: "none", meta: { page: "tools" } }),
+  "*": defineRoute({ render: "none", meta: { page: "measure" } }),
+});
 
 const sampleResult = {
   query: "react",
@@ -146,6 +157,10 @@ function writeDashboardStateToLocation(packageSpec, sizeOptions, mode = "push") 
 
   const method = mode === "replace" ? "replaceState" : "pushState";
   window.history[method](null, "", nextUrl);
+}
+
+function pageFromRoute(route) {
+  return route?.meta?.page === "tools" ? "tools" : "measure";
 }
 
 function formatKiB(bytes) {
@@ -288,8 +303,17 @@ function BrandMark() {
   );
 }
 
-function Header({ theme, onToggleTheme }) {
+function Header({ currentPage, theme, onToggleTheme }) {
   const isDark = theme === "dark";
+  const tabClass = (page) => {
+    const isActive = currentPage === page;
+    return [
+      "inline-flex h-[34px] items-center gap-2 rounded-[7px] px-3 text-[15px] font-[700] no-underline transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] dark:focus-visible:outline-[#1d9bf0]",
+      isActive
+        ? "bg-[#e8f5fe] text-[#0f6fb8] dark:bg-[#223949] dark:text-[#8ecdf8]"
+        : "text-[#354153] hover:bg-[#f5f8fa] dark:text-[#d6dde4] dark:hover:bg-[#253341]",
+    ].join(" ");
+  };
 
   return (
     <header className="flex h-[66px] items-center justify-between border-b border-[#d9e0e7] bg-white/80 px-7 backdrop-blur-md dark:border-[#38444d] dark:bg-[#15202b]/88 max-[980px]:h-auto max-[980px]:min-h-[66px] max-[980px]:items-start max-[980px]:gap-4 max-[980px]:px-5 max-[980px]:py-[18px]">
@@ -298,49 +322,69 @@ function Header({ theme, onToggleTheme }) {
         <h1 className="m-0 text-[22px] leading-[1.1] font-[750] text-[#111827] dark:text-[#f7f9f9] max-[680px]:text-xl">
           Package Size
         </h1>
-        <span className="max-w-full wrap-anywhere rounded-[7px] border border-[#b9e3ff] bg-[#e8f5fe] px-2.5 py-[3px] text-[15px] font-[650] whitespace-nowrap text-[#0f6fb8] dark:border-[#38444d] dark:bg-[#223949] dark:text-[#8ecdf8]">
-          @patrickjs/package-size
-        </span>
       </div>
-      <nav className="flex items-center gap-3.5 max-[680px]:hidden" aria-label="Project links">
-        <a
-          className={iconButtonClass}
-          href="https://github.com/PatrickJS/package-size"
-          aria-label="GitHub repository"
-        >
-          <GitBranch size={21} />
-        </a>
-        <span className="h-6 w-px bg-[#d9e0e7] dark:bg-[#38444d]" aria-hidden="true" />
-        <button
-          className={iconButtonClass}
-          type="button"
-          aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
-          aria-pressed={isDark}
-          onClick={onToggleTheme}
-        >
-          {isDark ? <Moon size={22} /> : <SunMedium size={22} />}
-        </button>
+      <nav
+        className="flex items-center gap-3.5 max-[680px]:w-full max-[680px]:justify-between"
+        aria-label="Primary navigation"
+      >
+        <div className="flex items-center gap-1.5">
+          <a
+            className={tabClass("measure")}
+            href="#/"
+            aria-current={currentPage === "measure" ? "page" : undefined}
+          >
+            <Gauge size={17} aria-hidden="true" />
+            Measure
+          </a>
+          <a
+            className={tabClass("tools")}
+            href="#/tools"
+            aria-current={currentPage === "tools" ? "page" : undefined}
+          >
+            <Link2 size={17} aria-hidden="true" />
+            Tools
+          </a>
+        </div>
+        <div className="flex items-center gap-3.5">
+          <a
+            className={iconButtonClass}
+            href="https://github.com/PatrickJS/package-size"
+            aria-label="GitHub repository"
+          >
+            <GitBranch size={21} />
+          </a>
+          <span className="h-6 w-px bg-[#d9e0e7] dark:bg-[#38444d]" aria-hidden="true" />
+          <button
+            className={iconButtonClass}
+            type="button"
+            aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+            aria-pressed={isDark}
+            onClick={onToggleTheme}
+          >
+            {isDark ? <Moon size={22} /> : <SunMedium size={22} />}
+          </button>
+        </div>
       </nav>
     </header>
   );
 }
 
-function Homepage({ previewUrl }) {
+function ToolsPage({ previewUrl }) {
   return (
     <section
-      className="mb-8 grid grid-cols-[minmax(0,0.9fr)_minmax(380px,0.8fr)] gap-7 border-b border-[#d9e0e7] pb-8 dark:border-[#38444d] max-[980px]:grid-cols-1"
-      aria-label="Package Size home"
+      className="grid grid-cols-[minmax(0,0.9fr)_minmax(380px,0.8fr)] gap-7 max-[980px]:grid-cols-1"
+      aria-label="Package Size tools"
     >
       <div className="pt-2">
         <h2 className="m-0 max-w-[760px] text-[42px] leading-[1.04] font-black tracking-normal text-[#0c1118] dark:text-[#f7f9f9] max-[680px]:text-[32px]">
-          Measure browser-resolved npm artifacts from your machine.
+          Self-serve tools for exact resolver URLs.
         </h2>
         <p className="mt-5 mb-6 max-w-[760px] text-[18px] leading-[1.45] text-[#5b6678] dark:text-[#8b98a5]">
-          Package Size resolves an npm spec through esm.unpkg.com, downloads the browser ESM artifact or metadata you request, and reports raw, gzip, and Brotli bytes. The dashboard, recents, and resolved-URL cache are local; the Pages dashboard uses browser storage, and cache misses fetch the artifact from esm.unpkg.com.
+          Local commands and URL construction live here so the measure page stays focused on package search, resolved versions, and size results.
         </p>
         <div className="grid max-w-[860px] grid-cols-2 gap-3.5 max-[680px]:grid-cols-1">
-          <CommandBlock icon={<Terminal size={18} />} title="JSON CLI" command="package-size json react" />
-          <CommandBlock icon={<Code2 size={18} />} title="Local dashboard" command="package-size dashboard --open" />
+          <CommandBlock icon={<Terminal size={18} />} title="Local JSON" command="node bin/package-size.js json react" />
+          <CommandBlock icon={<Code2 size={18} />} title="Dev dashboard" command="pnpm run dev" />
         </div>
         <div className="mt-5 flex items-center gap-2.5 text-[15px] font-[650] text-[#354153] dark:text-[#d6dde4]">
           <Database size={18} aria-hidden="true" />
@@ -367,7 +411,7 @@ function Homepage({ previewUrl }) {
             <button
               className="mt-4 inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-[7px] border-0 bg-linear-to-b from-[#1d9bf0] to-[#1a8cd8] px-4 text-[16px] font-bold text-white shadow-[0_10px_24px_rgba(29,155,240,0.20)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1d9bf0] dark:from-[#1d9bf0] dark:to-[#1a8cd8] dark:shadow-[0_12px_28px_rgba(29,155,240,0.18)]"
               type="button"
-              popovertarget={URL_BUILDER_POPOVER_ID}
+              popoverTarget={URL_BUILDER_POPOVER_ID}
             >
               <Link2 size={18} />
               URL builder
@@ -386,7 +430,7 @@ function CommandBlock({ icon, title, command }) {
         {icon}
         <span>{title}</span>
       </div>
-      <code className="block overflow-x-auto whitespace-nowrap text-[15px] font-bold text-[#111827] dark:text-[#f7f9f9]">
+      <code className="block wrap-anywhere text-[15px] leading-[1.35] font-bold text-[#111827] dark:text-[#f7f9f9]">
         {command}
       </code>
     </div>
@@ -457,8 +501,8 @@ function UrlBuilderPopover({
           <button
             className={iconButtonClass}
             type="button"
-            popovertarget={URL_BUILDER_POPOVER_ID}
-            popovertargetaction="hide"
+            popoverTarget={URL_BUILDER_POPOVER_ID}
+            popoverTargetAction="hide"
             aria-label="Close URL builder"
           >
             <X size={20} />
@@ -912,6 +956,7 @@ export default function App() {
   const [result, setResult] = useState(sampleResult);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState("measure");
   const [theme, setTheme] = useState(getPreferredTheme);
   const [recents, setRecents] = useState(() => {
     if (typeof window === "undefined") {
@@ -926,6 +971,26 @@ export default function App() {
     document.documentElement.style.colorScheme = theme;
     window.localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
+
+  useEffect(() => {
+    const router = createRouter({
+      mode: "signals",
+      urlMode: "hash",
+      root: document,
+      routes: pageRoutes,
+    }).start();
+
+    const syncPage = () => {
+      setCurrentPage(pageFromRoute(router.signals.get("router.route")));
+    };
+    const unsubscribe = router.signals.subscribe("router.route", syncPage);
+    syncPage();
+
+    return () => {
+      unsubscribe?.();
+      router.destroy();
+    };
+  }, []);
 
   const previewUrl = useMemo(() => {
     try {
@@ -1011,39 +1076,45 @@ export default function App() {
   return (
     <div className="min-h-screen min-w-80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(251,252,253,0.9)),radial-gradient(circle_at_25%_0%,rgba(29,155,240,0.07),transparent_32%)] font-sans text-[#111827] antialiased dark:bg-[linear-gradient(180deg,rgba(21,32,43,0.98),rgba(21,32,43,0.94)),radial-gradient(circle_at_25%_0%,rgba(29,155,240,0.10),transparent_34%)] dark:text-[#f7f9f9]">
       <Header
+        currentPage={currentPage}
         theme={theme}
         onToggleTheme={() => {
           setTheme((current) => (current === "dark" ? "light" : "dark"));
         }}
       />
       <main className="mx-auto w-[calc(100vw_-_64px)] max-w-[1376px] py-[38px] pb-14 max-[980px]:w-[calc(100%_-_32px)] max-[980px]:max-w-[760px] max-[980px]:pt-6">
-        <Homepage
-          previewUrl={previewUrl}
-        />
-        <SearchForm
-          query={query}
-          setQuery={setQuery}
-          loading={loading}
-          onSubmit={(event) => {
-            event.preventDefault();
-            runSearch();
-          }}
-        />
-        <ErrorMessage message={error} />
-        <ResultHeader
-          result={visibleResult}
-          loading={loading}
-          onRefresh={() => runSearch(visibleResult.query, visibleResult.options, { history: "replace" })}
-        />
-        <MetricsPanel result={visibleResult} />
-        <RecentsTable
-          recents={recents}
-          onSelect={runSearch}
-          onClear={() => {
-            writeRecents([]);
-            setRecents([]);
-          }}
-        />
+        {currentPage === "tools" ? (
+          <ToolsPage
+            previewUrl={previewUrl}
+          />
+        ) : (
+          <>
+            <SearchForm
+              query={query}
+              setQuery={setQuery}
+              loading={loading}
+              onSubmit={(event) => {
+                event.preventDefault();
+                runSearch();
+              }}
+            />
+            <ErrorMessage message={error} />
+            <ResultHeader
+              result={visibleResult}
+              loading={loading}
+              onRefresh={() => runSearch(visibleResult.query, visibleResult.options, { history: "replace" })}
+            />
+            <MetricsPanel result={visibleResult} />
+            <RecentsTable
+              recents={recents}
+              onSelect={runSearch}
+              onClear={() => {
+                writeRecents([]);
+                setRecents([]);
+              }}
+            />
+          </>
+        )}
       </main>
       <UrlBuilderPopover
         error={error}
