@@ -46,6 +46,7 @@
     "test": "vitest run"
   },
   "files": [
+    "CHANGELOG.md",
     "README.md",
     "bin",
     "dist",
