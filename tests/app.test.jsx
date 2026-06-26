@@ -49,16 +49,24 @@ const reactSizesByVersion = {
 
 function resultFor(packageName, overrides = {}) {
   const requested = String(packageName ?? "react");
-  const isAsyncFramework = requested.startsWith("@async/framework");
+  const asyncMatch = requested.match(/^(@async\/[a-z0-9._~-]+)(?:@(.+))?$/);
+  const asyncSizes = {
+    "@async/framework": [136536, 34374, 29063],
+    "@async/json": [18420, 4912, 4096],
+    "@async/db": [42120, 10240, 8760],
+    "@async/pipeline": [88220, 21440, 18120],
+    "@async/web": [52480, 13200, 10920],
+  };
   const isZod = requested.startsWith("zod");
-  const name = isAsyncFramework ? "@async/framework" : isZod ? "zod" : "react";
+  const name = asyncMatch ? asyncMatch[1] : isZod ? "zod" : "react";
   const requestedVersion = requested.match(/^react@(.+)$/)?.[1];
-  const asyncVersion = requested.match(/^@async\/framework@(.+)$/)?.[1];
-  const version = isAsyncFramework ? asyncVersion ?? "0.13.0" : isZod ? "4.4.3" : requestedVersion ?? "19.2.7";
+  const asyncVersion = asyncMatch?.[2];
+  const version = asyncMatch ? asyncVersion ?? "0.13.0" : isZod ? "4.4.3" : requestedVersion ?? "19.2.7";
   const reactSizes = reactSizesByVersion[version] ?? reactSizesByVersion["19.2.7"];
-  const rawBytes = isAsyncFramework ? 136536 : isZod ? 545251 : reactSizes.rawBytes;
-  const gzipBytes = isAsyncFramework ? 34374 : isZod ? 80474 : reactSizes.gzipBytes;
-  const brotliBytes = isAsyncFramework ? 29063 : isZod ? 64245 : reactSizes.brotliBytes;
+  const asyncPackageSizes = asyncSizes[name] ?? asyncSizes["@async/framework"];
+  const rawBytes = asyncMatch ? asyncPackageSizes[0] : isZod ? 545251 : reactSizes.rawBytes;
+  const gzipBytes = asyncMatch ? asyncPackageSizes[1] : isZod ? 80474 : reactSizes.gzipBytes;
+  const brotliBytes = asyncMatch ? asyncPackageSizes[2] : isZod ? 64245 : reactSizes.brotliBytes;
   const options = {
     ...defaultOptions,
     ...overrides.options,
@@ -480,6 +488,78 @@ describe("App", () => {
       expect(lastSizeRequestUrl()).toContain("pkg=react%4017.0.2");
     });
     expect(within(screen.getByLabelText("Package result")).getByText("17.0.2")).toBeInTheDocument();
+  });
+
+  it("loads versions from the result header dropdown and latest action", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText("19.2.7");
+    const resultSection = screen.getByLabelText("Package result");
+    const versionSelect = within(resultSection).getByRole("combobox", { name: "Version" });
+    await waitFor(() => {
+      expect(within(versionSelect).getByRole("option", { name: "18.3.1" })).toBeInTheDocument();
+    });
+
+    await user.selectOptions(versionSelect, "18.3.1");
+    await waitFor(() => {
+      expect(lastSizeRequestUrl()).toContain("pkg=react%4018.3.1");
+    });
+    expect(within(resultSection).getByRole("combobox", { name: "Version" })).toHaveValue("18.3.1");
+
+    await user.click(within(resultSection).getByRole("button", { name: "Load latest react" }));
+    await waitFor(() => {
+      expect(lastSizeRequestUrl()).toContain("pkg=react%4019.2.7");
+    });
+  });
+
+  it("tracks comma-separated packages on the dashboard and opens one in measure", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("link", { name: "Dashboard" }));
+    const dashboard = screen.getByLabelText("Package dashboard");
+
+    await user.clear(within(dashboard).getByLabelText("Tracked packages"));
+    await user.type(
+      within(dashboard).getByLabelText("Tracked packages"),
+      "@async/framework, @async/json, @async/db, @async/pipeline, @async/web",
+    );
+    await user.click(within(dashboard).getByRole("button", { name: "Track packages" }));
+
+    expect(await within(dashboard).findByText("@async/framework")).toBeInTheDocument();
+    expect(await within(dashboard).findByText("@async/json")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchUrls("/api/size").some((url) => url.includes("pkg=%40async%2Fjson"))).toBe(true);
+    });
+    const tracked = JSON.parse(window.localStorage.getItem("package-size.tracked-packages.v1"));
+    expect(tracked.map((item) => item.packageSpec)).toEqual(expect.arrayContaining([
+      "@async/framework",
+      "@async/json",
+      "@async/db",
+      "@async/pipeline",
+      "@async/web",
+    ]));
+
+    await user.click(within(dashboard).getByRole("button", { name: "Open @async/json in measure" }));
+    const resultSection = await screen.findByLabelText("Package result");
+    expect(within(resultSection).getByRole("heading", { level: 2, name: "@async/json" })).toBeInTheDocument();
+  });
+
+  it("defaults to the dashboard when tracked packages are saved and no route hash is set", async () => {
+    window.localStorage.setItem("package-size.tracked-packages.v1", JSON.stringify([
+      {
+        packageSpec: "@async/framework",
+        options: defaultOptions,
+        addedAt: "2026-06-26T00:00:00.000Z",
+      },
+    ]));
+
+    render(<App />);
+
+    expect(screen.getByLabelText("Package dashboard")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("aria-current", "page");
+    expect(window.location.hash).toBe("#/dashboard");
   });
 
   it("restores the saved version graph preference", async () => {

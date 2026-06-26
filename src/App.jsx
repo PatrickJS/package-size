@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Clipboard,
   Code2,
+  BarChart3,
   Database,
   Download,
   Gauge,
@@ -18,6 +19,7 @@ import {
   Loader2,
   Moon,
   PackageSearch,
+  Plus,
   RotateCcw,
   Search,
   SunMedium,
@@ -56,7 +58,9 @@ import {
 const RECENTS_KEY = "package-size.recent-searches.v2";
 const LEGACY_RECENTS_KEY = "package-size.recent-searches.v1";
 const THEME_KEY = "package-size.theme.v1";
+const TRACKED_PACKAGES_KEY = "package-size.tracked-packages.v1";
 const MAX_RECENTS = 8;
+const MAX_TRACKED_PACKAGES = 24;
 const DEFAULT_VERSION_HISTORY_LIMIT = 5;
 const VERSION_HISTORY_PAGE_SIZE = 5;
 const MAX_VERSION_HISTORY = 100;
@@ -67,6 +71,7 @@ const VERSION_HISTORY_GRAPH_KEY = "package-size.version-history.graph.v1";
 const conditionOptions = ["browser", "react-server", "worker"];
 const pageRoutes = createRouteRegistry({
   "/": defineRoute({ render: "none", meta: { page: "measure" } }),
+  "/dashboard": defineRoute({ render: "none", meta: { page: "dashboard" } }),
   "/tools": defineRoute({ render: "none", meta: { page: "tools" } }),
   "*": defineRoute({ render: "none", meta: { page: "measure" } }),
 });
@@ -183,7 +188,24 @@ function writeDashboardStateToLocation(packageSpec, sizeOptions, mode = "push") 
 }
 
 function pageFromRoute(route) {
+  if (route?.meta?.page === "dashboard") {
+    return "dashboard";
+  }
   return route?.meta?.page === "tools" ? "tools" : "measure";
+}
+
+function pageFromLocationHash(trackedPackages = []) {
+  if (typeof window === "undefined") {
+    return "measure";
+  }
+  const hashPath = window.location.hash.replace(/^#/, "") || "/";
+  if (hashPath.startsWith("/dashboard")) {
+    return "dashboard";
+  }
+  if (hashPath.startsWith("/tools")) {
+    return "tools";
+  }
+  return window.location.hash ? "measure" : trackedPackages.length ? "dashboard" : "measure";
 }
 
 function formatKiB(bytes) {
@@ -372,6 +394,110 @@ function readRecents() {
 
 function writeRecents(recents) {
   window.localStorage.setItem(RECENTS_KEY, JSON.stringify(recents));
+}
+
+function trackedPackageId(packageSpec, sizeOptions) {
+  return `${String(packageSpec ?? "").trim()}|${sizeOptionsSignature(sizeOptions)}`;
+}
+
+function normalizeTrackedResult(result) {
+  if (
+    !result?.package ||
+    !result?.version ||
+    typeof result.rawBytes !== "number" ||
+    typeof result.gzipBytes !== "number" ||
+    typeof result.brotliBytes !== "number"
+  ) {
+    return null;
+  }
+
+  let options;
+  try {
+    options = normalizeSizeOptions(result.options ?? {});
+  } catch {
+    return null;
+  }
+
+  return {
+    query: result.query ?? packageSpecFromResolved(result.package, result.version),
+    package: result.package,
+    pinnedQuery: result.pinnedQuery ?? packageSpecFromResolved(result.package, result.version),
+    version: result.version,
+    rawBytes: result.rawBytes,
+    gzipBytes: result.gzipBytes,
+    brotliBytes: result.brotliBytes,
+    requestUrl: result.requestUrl ?? result.resolvedUrl,
+    resolvedUrl: result.resolvedUrl,
+    options,
+    contentType: result.contentType,
+    source: result.source,
+    measuredAt: result.measuredAt,
+    cacheHit: Boolean(result.cacheHit),
+  };
+}
+
+function normalizeTrackedPackage(item) {
+  const packageSpec = String(item?.packageSpec ?? item?.query ?? "").trim();
+  if (!packageSpec) {
+    return null;
+  }
+
+  let options;
+  try {
+    parsePackageSpec(packageSpec);
+    options = normalizeSizeOptions(item.options ?? {});
+  } catch {
+    return null;
+  }
+
+  const result = normalizeTrackedResult(item.result);
+  return {
+    id: trackedPackageId(packageSpec, options),
+    packageSpec,
+    options,
+    result,
+    addedAt: item.addedAt ?? new Date().toISOString(),
+    updatedAt: item.updatedAt ?? result?.measuredAt ?? null,
+    error: item.error ?? "",
+  };
+}
+
+function readTrackedPackages() {
+  try {
+    const raw = window.localStorage.getItem(TRACKED_PACKAGES_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return parsed.map(normalizeTrackedPackage).filter(Boolean).slice(0, MAX_TRACKED_PACKAGES);
+  } catch {
+    return [];
+  }
+}
+
+function writeTrackedPackages(packages) {
+  window.localStorage.setItem(TRACKED_PACKAGES_KEY, JSON.stringify(packages));
+}
+
+function splitTrackedPackageSpecs(value) {
+  return String(value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function trackedPackageFromSpec(packageSpec, sizeOptions, existing = {}) {
+  const parsed = parsePackageSpec(packageSpec);
+  const options = normalizeSizeOptions(sizeOptions ?? {});
+  const spec = parsed.version
+    ? packageSpecFromResolved(parsed.packageName, parsed.version)
+    : parsed.packageName;
+  return {
+    id: trackedPackageId(spec, options),
+    packageSpec: spec,
+    options,
+    result: normalizeTrackedResult(existing.result),
+    addedAt: existing.addedAt ?? new Date().toISOString(),
+    updatedAt: existing.updatedAt ?? null,
+    error: "",
+  };
 }
 
 function sameSizeOptions(left, right) {
@@ -788,6 +914,14 @@ function Header({ currentPage, theme, onToggleTheme }) {
             Measure
           </a>
           <a
+            className={tabClass("dashboard")}
+            href="#/dashboard"
+            aria-current={currentPage === "dashboard" ? "page" : undefined}
+          >
+            <BarChart3 size={17} aria-hidden="true" />
+            Dashboard
+          </a>
+          <a
             className={tabClass("tools")}
             href="#/tools"
             aria-current={currentPage === "tools" ? "page" : undefined}
@@ -1195,7 +1329,38 @@ function PackageRegistryLinks({ metadata, packageName }) {
   );
 }
 
-function ResultHeader({ packageMetadata, result, loading, onRefresh }) {
+function versionSelectOptions(result, entries) {
+  const byVersion = new Map();
+  if (result?.version) {
+    byVersion.set(result.version, {
+      version: result.version,
+      loaded: true,
+    });
+  }
+  for (const entry of entries ?? []) {
+    if (!entry?.version || !isStableVersion(entry.version)) {
+      continue;
+    }
+    byVersion.set(entry.version, {
+      version: entry.version,
+      loaded: Boolean(entry.loaded),
+    });
+  }
+  return [...byVersion.values()].sort((left, right) => (
+    compareStableVersionsDesc(left.version, right.version)
+  ));
+}
+
+function ResultHeader({
+  packageMetadata,
+  result,
+  loading,
+  onLoadLatest,
+  onLoadVersion,
+  onRefresh,
+  versionEntries,
+}) {
+  const versions = versionSelectOptions(result, versionEntries);
   return (
     <section
       className="mb-7 flex items-start justify-between gap-6 max-[980px]:flex-col max-[980px]:items-stretch"
@@ -1211,10 +1376,30 @@ function ResultHeader({ packageMetadata, result, loading, onRefresh }) {
         <p className="my-2 mb-5 max-w-[740px] overflow-hidden text-base leading-[1.35] text-ellipsis whitespace-nowrap text-[#5b6678] dark:text-[#8b98a5] max-[680px]:whitespace-normal">
           {result.resolvedUrl.replace("https://", "")}
         </p>
-        <div className="flex items-center gap-[18px] text-[15px] text-[#5b6678] dark:text-[#8b98a5] max-[680px]:flex-wrap max-[680px]:gap-x-3 max-[680px]:gap-y-2">
-          <span className="inline-flex h-9 min-w-24 items-center rounded-[5px] border border-[#cbd4de] bg-white px-3 text-[17px] text-[#111827] dark:border-[#38444d] dark:bg-[#192734] dark:text-[#f7f9f9]">
-            {result.version}
-          </span>
+        <div className="flex items-center gap-3 text-[15px] text-[#5b6678] dark:text-[#8b98a5] max-[680px]:flex-wrap max-[680px]:gap-x-3 max-[680px]:gap-y-2">
+          <select
+            className="h-9 min-w-28 rounded-[5px] border border-[#cbd4de] bg-white px-3 text-[17px] font-[650] text-[#111827] outline-0 focus:border-[#1d9bf0] focus:ring-2 focus:ring-[#1d9bf0]/15 disabled:opacity-70 dark:border-[#38444d] dark:bg-[#192734] dark:text-[#f7f9f9] dark:focus:border-[#1d9bf0] dark:focus:ring-[#1d9bf0]/20"
+            aria-label="Version"
+            value={result.version}
+            disabled={loading || versions.length <= 1}
+            onChange={(event) => onLoadVersion(event.target.value)}
+          >
+            {versions.map((entry) => (
+              <option key={entry.version} value={entry.version}>
+                {entry.version}
+              </option>
+            ))}
+          </select>
+          <button
+            className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-[5px] border border-[#cbd4de] bg-white px-3 text-[15px] font-bold text-[#1d9bf0] hover:bg-[#f5f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] disabled:cursor-wait disabled:opacity-80 dark:border-[#38444d] dark:bg-[#192734] dark:text-[#8ecdf8] dark:hover:bg-[#253341] dark:focus-visible:outline-[#1d9bf0]"
+            type="button"
+            disabled={loading}
+            onClick={onLoadLatest}
+            aria-label={`Load latest ${result.package}`}
+          >
+            <RotateCcw size={15} />
+            <span>Load Latest</span>
+          </button>
           <span className="h-[18px] w-px bg-[#d9e0e7] dark:bg-[#38444d]" aria-hidden="true" />
           <span>{resultKind(result)}</span>
           <span className="h-[18px] w-px bg-[#d9e0e7] dark:bg-[#38444d]" aria-hidden="true" />
@@ -1832,14 +2017,204 @@ function RecentsTable({ recents, onSelect, onClear }) {
   );
 }
 
+function DashboardPage({
+  busyIds,
+  onAdd,
+  onOpen,
+  onRefresh,
+  onRefreshAll,
+  onRemove,
+  setTrackingQuery,
+  trackedPackages,
+  trackingError,
+  trackingQuery,
+}) {
+  const busySet = new Set(busyIds);
+  const anyBusy = busyIds.length > 0;
+
+  return (
+    <section aria-label="Package dashboard">
+      <div className="mb-5 flex items-start justify-between gap-4 max-[680px]:flex-col max-[680px]:items-stretch">
+        <div>
+          <h2 className="m-0 text-[32px] leading-[1.1] font-black text-[#0c1118] dark:text-[#f7f9f9]">
+            Package dashboard
+          </h2>
+          <p className="m-0 mt-2 text-[15px] font-[650] text-[#5b6678] dark:text-[#8b98a5]">
+            {trackedPackages.length} tracked {trackedPackages.length === 1 ? "package" : "packages"}
+          </p>
+        </div>
+        <button
+          className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-[#cbd4de] bg-white px-3.5 text-[15px] font-bold text-[#1d9bf0] hover:bg-[#f5f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] disabled:cursor-wait disabled:opacity-80 dark:border-[#38444d] dark:bg-[#192734] dark:text-[#8ecdf8] dark:hover:bg-[#253341] dark:focus-visible:outline-[#1d9bf0]"
+          type="button"
+          onClick={onRefreshAll}
+          disabled={!trackedPackages.length || anyBusy}
+          aria-label="Refresh all tracked packages"
+        >
+          {anyBusy ? <Loader2 className="animate-spin" size={18} /> : <RotateCcw size={18} />}
+          <span>Refresh all</span>
+        </button>
+      </div>
+
+      <form
+        className="mb-7 grid grid-cols-[minmax(220px,1fr)_auto] gap-3 max-[760px]:grid-cols-1"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onAdd();
+        }}
+      >
+        <label className="grid gap-1.5 text-sm font-bold text-[#354153] dark:text-[#d6dde4]">
+          Tracked packages
+          <input
+            className={fieldClass}
+            autoCapitalize="none"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck="false"
+            value={trackingQuery}
+            onChange={(event) => setTrackingQuery(event.target.value)}
+            placeholder="@async/framework, @async/json"
+          />
+        </label>
+        <button
+          className="mt-[22px] inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-[7px] border-0 bg-linear-to-b from-[#1d9bf0] to-[#1a8cd8] px-4 text-[15px] font-bold text-white shadow-[0_10px_24px_rgba(29,155,240,0.20)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1d9bf0] disabled:cursor-wait disabled:opacity-80 dark:from-[#1d9bf0] dark:to-[#1a8cd8] dark:shadow-[0_12px_28px_rgba(29,155,240,0.18)] max-[760px]:mt-0"
+          type="submit"
+          disabled={anyBusy}
+        >
+          <Plus size={18} />
+          Track packages
+        </button>
+      </form>
+
+      {trackingError ? (
+        <div
+          className="mb-4 rounded-[7px] border border-[#fac9be] bg-[#fff4f1] px-3.5 py-[11px] text-[15px] font-semibold text-[#a43d28] dark:border-[#8c3d32] dark:bg-[#3a2526] dark:text-[#ffb4a8]"
+          role="alert"
+        >
+          {trackingError}
+        </div>
+      ) : null}
+
+      {trackedPackages.length ? (
+        <div className="overflow-x-auto max-[680px]:overflow-visible">
+          <table className="w-full border-collapse">
+            <thead className="max-[680px]:hidden">
+              <tr>
+                <th className={thClass}>Package</th>
+                <th className={thClass}>Version</th>
+                <th className={thClass}>Minified</th>
+                <th className={thClass}>Gzip</th>
+                <th className={thClass}>Brotli</th>
+                <th className={`${thClass} max-[980px]:hidden`}>Last checked</th>
+                <th className={`${thClass} w-[108px]`} aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody className="max-[680px]:grid max-[680px]:gap-3.5">
+              {trackedPackages.map((item) => {
+                const result = item.result;
+                const busy = busySet.has(item.id);
+                const displayName = result?.package ?? item.packageSpec;
+                return (
+                  <tr
+                    className="max-[680px]:relative max-[680px]:grid max-[680px]:grid-cols-2 max-[680px]:gap-x-[18px] max-[680px]:gap-y-2.5 max-[680px]:border-b max-[680px]:border-[#e1e7ed] max-[680px]:pt-[13px] max-[680px]:pr-[42px] max-[680px]:pb-3.5 max-[680px]:pl-0 dark:max-[680px]:border-[#38444d]"
+                    key={item.id}
+                  >
+                    <td className={`${tdClass} max-[680px]:col-span-2`}>
+                      <button
+                        className="inline-flex cursor-pointer items-center gap-3.5 border-0 bg-transparent p-0 font-[750] text-[#111827] dark:text-[#f7f9f9]"
+                        type="button"
+                        onClick={() => onOpen(item)}
+                      >
+                        <PackageIcon name={displayName} />
+                        <span>{displayName}</span>
+                      </button>
+                      {item.error ? (
+                        <p className="m-0 mt-1 text-sm font-[650] text-[#a43d28] dark:text-[#ffb4a8]">
+                          {item.error}
+                        </p>
+                      ) : null}
+                      <p className="m-0 mt-1 hidden text-sm font-[650] text-[#8b95a4] max-[980px]:block max-[680px]:hidden dark:text-[#8b98a5]">
+                        {busy ? "Checking" : item.updatedAt ? `Checked ${relativeTime(item.updatedAt)}` : "Not checked"}
+                      </p>
+                    </td>
+                    <td className={tdClass}>
+                      <MobileLabel>Version</MobileLabel>
+                      {busy ? "Checking" : result?.version ?? "Not checked"}
+                    </td>
+                    <td className={`${tdClass} ${result ? toneStyles.minified.text : ""}`}>
+                      <MobileLabel>Minified</MobileLabel>
+                      {result ? formatKiB(result.rawBytes) : "Not checked"}
+                    </td>
+                    <td className={`${tdClass} ${result ? toneStyles.gzip.text : ""}`}>
+                      <MobileLabel>Gzip</MobileLabel>
+                      {result ? formatKiB(result.gzipBytes) : "Not checked"}
+                    </td>
+                    <td className={`${tdClass} ${result ? toneStyles.brotli.text : ""}`}>
+                      <MobileLabel>Brotli</MobileLabel>
+                      {result ? formatKiB(result.brotliBytes) : "Not checked"}
+                    </td>
+                    <td className={`${tdClass} max-[980px]:hidden`}>
+                      <MobileLabel>Last</MobileLabel>
+                      {item.updatedAt ? relativeTime(item.updatedAt) : "Not checked"}
+                    </td>
+                    <td className={`${tdClass} max-[680px]:absolute max-[680px]:top-3 max-[680px]:right-0`}>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          className="inline-grid h-8 w-8 place-items-center rounded-[7px] border-0 bg-transparent text-[#657284] hover:bg-[#f5f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] disabled:cursor-wait disabled:opacity-70 dark:text-[#8b98a5] dark:hover:bg-[#253341] dark:focus-visible:outline-[#1d9bf0]"
+                          type="button"
+                          onClick={() => onRefresh(item)}
+                          disabled={busy}
+                          aria-label={`Refresh ${item.packageSpec}`}
+                        >
+                          {busy ? <Loader2 className="animate-spin" size={18} /> : <RotateCcw size={18} />}
+                        </button>
+                        <button
+                          className="inline-grid h-8 w-8 place-items-center rounded-[7px] border-0 bg-transparent text-[#657284] hover:bg-[#f5f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] dark:text-[#8b98a5] dark:hover:bg-[#253341] dark:focus-visible:outline-[#1d9bf0]"
+                          type="button"
+                          onClick={() => onOpen(item)}
+                          aria-label={`Open ${item.packageSpec} in measure`}
+                        >
+                          <ChevronRight size={20} />
+                        </button>
+                        <button
+                          className="inline-grid h-8 w-8 place-items-center rounded-[7px] border-0 bg-transparent text-[#657284] hover:bg-[#f5f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] dark:text-[#8b98a5] dark:hover:bg-[#253341] dark:focus-visible:outline-[#1d9bf0]"
+                          type="button"
+                          onClick={() => onRemove(item.id)}
+                          aria-label={`Remove ${item.packageSpec}`}
+                        >
+                          <X size={18} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="flex min-h-[130px] items-center justify-center gap-2.5 border-y border-[#e1e7ed] font-[650] text-[#5b6678] dark:border-[#38444d] dark:text-[#8b98a5]">
+          <BarChart3 size={26} />
+          <span>No tracked packages yet.</span>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function App() {
   const [initialDashboardState] = useState(readDashboardStateFromLocation);
+  const [initialTrackedPackages] = useState(() => {
+    if (typeof window === "undefined") {
+      return [];
+    }
+    return readTrackedPackages();
+  });
   const [query, setQuery] = useState(initialDashboardState.query);
   const [sizeOptions, setSizeOptions] = useState(initialDashboardState.sizeOptions);
   const [result, setResult] = useState(sampleResult);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [currentPage, setCurrentPage] = useState("measure");
+  const [currentPage, setCurrentPage] = useState(() => pageFromLocationHash(initialTrackedPackages));
   const [theme, setTheme] = useState(getPreferredTheme);
   const [versionHistory, setVersionHistory] = useState({
     status: "idle",
@@ -1858,7 +2233,12 @@ export default function App() {
     }
     return readRecents();
   });
+  const [trackedPackages, setTrackedPackages] = useState(initialTrackedPackages);
+  const [trackingQuery, setTrackingQuery] = useState("@async/framework");
+  const [trackingError, setTrackingError] = useState("");
+  const [trackingBusyIds, setTrackingBusyIds] = useState([]);
   const didAutoMeasure = useRef(false);
+  const searchRequestId = useRef(0);
   const historyRequestId = useRef(0);
   const historyTestRequestId = useRef(0);
 
@@ -1869,6 +2249,10 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    if (initialTrackedPackages.length && !window.location.hash) {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#/dashboard`);
+    }
+
     const router = createRouter({
       mode: "signals",
       urlMode: "hash",
@@ -1886,7 +2270,7 @@ export default function App() {
       unsubscribe?.();
       router.destroy();
     };
-  }, []);
+  }, [initialTrackedPackages.length]);
 
   const previewUrl = useMemo(() => {
     try {
@@ -1907,6 +2291,110 @@ export default function App() {
       return next;
     });
   }, []);
+
+  const updateTrackedPackages = useCallback((updater) => {
+    setTrackedPackages((current) => {
+      const next = typeof updater === "function" ? updater(current) : updater;
+      writeTrackedPackages(next);
+      return next;
+    });
+  }, []);
+
+  const setTrackedPackageBusy = useCallback((id, busy) => {
+    setTrackingBusyIds((current) => {
+      if (busy) {
+        return current.includes(id) ? current : [...current, id];
+      }
+      return current.filter((item) => item !== id);
+    });
+  }, []);
+
+  const refreshTrackedPackage = useCallback(async (item) => {
+    const tracked = normalizeTrackedPackage(item);
+    if (!tracked) {
+      return null;
+    }
+
+    setTrackedPackageBusy(tracked.id, true);
+    try {
+      const nextResult = await fetchPackageSize(tracked.packageSpec, tracked.options);
+      const checkedAt = new Date().toISOString();
+      const nextTracked = {
+        ...tracked,
+        result: normalizeTrackedResult(nextResult),
+        updatedAt: checkedAt,
+        error: "",
+      };
+      updateTrackedPackages((current) => current.map((entry) => (
+        entry.id === tracked.id ? nextTracked : entry
+      )));
+      return nextResult;
+    } catch (nextError) {
+      updateTrackedPackages((current) => current.map((entry) => (
+        entry.id === tracked.id
+          ? {
+              ...entry,
+              error: nextError.message || "Package size request failed.",
+              updatedAt: new Date().toISOString(),
+            }
+          : entry
+      )));
+      return null;
+    } finally {
+      setTrackedPackageBusy(tracked.id, false);
+    }
+  }, [setTrackedPackageBusy, updateTrackedPackages]);
+
+  const addTrackedPackage = useCallback(async (
+    packageSpecs = trackingQuery,
+    options = sizeOptions,
+  ) => {
+    const specs = splitTrackedPackageSpecs(packageSpecs);
+    if (!specs.length) {
+      setTrackingError("Enter one or more package names.");
+      return [];
+    }
+
+    let trackedItems;
+    try {
+      const seen = new Set();
+      trackedItems = specs
+        .map((packageSpec) => trackedPackageFromSpec(packageSpec, options))
+        .filter((item) => {
+          if (seen.has(item.id)) {
+            return false;
+          }
+          seen.add(item.id);
+          return true;
+        });
+    } catch (nextError) {
+      setTrackingError(nextError.message);
+      return [];
+    }
+
+    setTrackingError("");
+    updateTrackedPackages((current) => {
+      const currentById = new Map(current.map((item) => [item.id, item]));
+      const nextTrackedItems = trackedItems.map((item) => {
+        const existing = currentById.get(item.id);
+        return existing
+          ? {
+              ...item,
+              result: existing.result,
+              addedAt: existing.addedAt,
+              updatedAt: existing.updatedAt,
+            }
+          : item;
+      });
+      return [
+        ...nextTrackedItems,
+        ...current.filter((item) => !nextTrackedItems.some((nextItem) => nextItem.id === item.id)),
+      ].slice(0, MAX_TRACKED_PACKAGES);
+    });
+    setTrackingQuery("");
+    await Promise.all(trackedItems.map((item) => refreshTrackedPackage(item)));
+    return trackedItems;
+  }, [refreshTrackedPackage, sizeOptions, trackingQuery, updateTrackedPackages]);
 
   const loadVersionHistoryForResult = useCallback(async (
     nextResult,
@@ -2035,9 +2523,14 @@ export default function App() {
       setSizeOptions(normalizedOptions);
       setLoading(true);
       setError("");
+      const requestId = searchRequestId.current + 1;
+      searchRequestId.current = requestId;
 
       try {
         const nextResult = await fetchPackageSize(trimmed, normalizedOptions);
+        if (searchRequestId.current !== requestId) {
+          return null;
+        }
         const nextHistoryLimit = versionHistory.loadedFor === historyContextKey(nextResult)
           ? versionHistory.limit
           : DEFAULT_VERSION_HISTORY_LIMIT;
@@ -2049,10 +2542,14 @@ export default function App() {
         }
         return nextResult;
       } catch (nextError) {
-        setError(nextError.message);
+        if (searchRequestId.current === requestId) {
+          setError(nextError.message);
+        }
         return null;
       } finally {
-        setLoading(false);
+        if (searchRequestId.current === requestId) {
+          setLoading(false);
+        }
       }
     },
     [loadVersionHistoryForResult, query, saveRecent, sizeOptions, versionHistory.limit, versionHistory.loadedFor],
@@ -2063,8 +2560,11 @@ export default function App() {
       return;
     }
     didAutoMeasure.current = true;
+    if (currentPage !== "measure") {
+      return;
+    }
     runSearch(initialDashboardState.query, initialDashboardState.sizeOptions, { history: "replace" });
-  }, [initialDashboardState, runSearch]);
+  }, [currentPage, initialDashboardState, runSearch]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -2147,6 +2647,47 @@ export default function App() {
     }
   }, [testingVersionHistory, versionHistory.entries, visibleResult]);
 
+  const versionEntriesForResult = versionHistory.loadedFor === historyContextKey(visibleResult)
+    ? versionHistory.entries
+    : [];
+
+  const loadResultVersion = useCallback((version) => {
+    if (!version || version === visibleResult.version) {
+      return;
+    }
+    runSearch(packageSpecFromResolved(visibleResult.package, version), visibleResult.options);
+  }, [runSearch, visibleResult]);
+
+  const loadLatestResultVersion = useCallback(() => {
+    const latestStable = versionEntriesForResult
+      .filter((entry) => isStableVersion(entry.version))
+      .sort((left, right) => compareStableVersionsDesc(left.version, right.version))[0];
+    const packageSpec = latestStable?.version
+      ? packageSpecFromResolved(visibleResult.package, latestStable.version)
+      : visibleResult.package;
+    runSearch(packageSpec, visibleResult.options, { history: "push" });
+  }, [runSearch, versionEntriesForResult, visibleResult]);
+
+  const refreshAllTrackedPackages = useCallback(async () => {
+    await Promise.all(trackedPackages.map((item) => refreshTrackedPackage(item)));
+  }, [refreshTrackedPackage, trackedPackages]);
+
+  const removeTrackedPackage = useCallback((id) => {
+    updateTrackedPackages((current) => current.filter((item) => item.id !== id));
+  }, [updateTrackedPackages]);
+
+  const openTrackedPackage = useCallback((item) => {
+    const tracked = normalizeTrackedPackage(item);
+    if (!tracked) {
+      return;
+    }
+    const packageSpec = tracked.result?.pinnedQuery ?? tracked.packageSpec;
+    const search = buildDashboardSearchParams(packageSpec, tracked.options);
+    window.history.pushState(null, "", `${window.location.pathname}?${search}#/`);
+    setCurrentPage("measure");
+    runSearch(packageSpec, tracked.options, { history: "replace" });
+  }, [runSearch]);
+
   return (
     <div className="min-h-screen min-w-80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(251,252,253,0.9)),radial-gradient(circle_at_25%_0%,rgba(29,155,240,0.07),transparent_32%)] font-sans text-[#111827] antialiased dark:bg-[linear-gradient(180deg,rgba(21,32,43,0.98),rgba(21,32,43,0.94)),radial-gradient(circle_at_25%_0%,rgba(29,155,240,0.10),transparent_34%)] dark:text-[#f7f9f9]">
       <Header
@@ -2160,6 +2701,19 @@ export default function App() {
         {currentPage === "tools" ? (
           <ToolsPage
             previewUrl={previewUrl}
+          />
+        ) : currentPage === "dashboard" ? (
+          <DashboardPage
+            busyIds={trackingBusyIds}
+            trackedPackages={trackedPackages}
+            trackingError={trackingError}
+            trackingQuery={trackingQuery}
+            setTrackingQuery={setTrackingQuery}
+            onAdd={addTrackedPackage}
+            onRefresh={refreshTrackedPackage}
+            onRefreshAll={refreshAllTrackedPackages}
+            onRemove={removeTrackedPackage}
+            onOpen={openTrackedPackage}
           />
         ) : (
           <>
@@ -2177,6 +2731,9 @@ export default function App() {
               result={visibleResult}
               packageMetadata={visiblePackageMetadata}
               loading={loading}
+              versionEntries={versionEntriesForResult}
+              onLoadVersion={loadResultVersion}
+              onLoadLatest={loadLatestResultVersion}
               onRefresh={() => runSearch(visibleResult.query, visibleResult.options, { history: "replace" })}
             />
             <MetricsPanel result={visibleResult} />
