@@ -1,5 +1,13 @@
 import { measurePackageSize, PackageSizeError } from "./size-service.js";
-import { PackageUrlError, sizeOptionsFromSearchParams } from "../src/package-url.js";
+import {
+  PackageUrlError,
+  parsePackageSpec,
+  sizeOptionsFromSearchParams,
+} from "../src/package-url.js";
+import {
+  fetchPackageVersionHistory,
+  PackageVersionHistoryError,
+} from "./version-history.js";
 
 export function writeJson(response, statusCode, payload, extraHeaders = {}) {
   const body = JSON.stringify(payload);
@@ -13,11 +21,24 @@ export function writeJson(response, statusCode, payload, extraHeaders = {}) {
   response.end(body);
 }
 
-export function createSizeApiHandler({ measure = measurePackageSize } = {}) {
+const API_PATHS = new Set(["/api/size", "/api/versions"]);
+
+function isTypedApiError(error) {
+  return (
+    error instanceof PackageSizeError ||
+    error instanceof PackageUrlError ||
+    error instanceof PackageVersionHistoryError
+  );
+}
+
+export function createSizeApiHandler({
+  fetchVersions = fetchPackageVersionHistory,
+  measure = measurePackageSize,
+} = {}) {
   return async function handleSizeApi(request, response) {
     const url = new URL(request.url ?? "/", "http://localhost");
 
-    if (url.pathname !== "/api/size") {
+    if (!API_PATHS.has(url.pathname)) {
       return false;
     }
 
@@ -42,10 +63,21 @@ export function createSizeApiHandler({ measure = measurePackageSize } = {}) {
 
     try {
       const sizeOptions = sizeOptionsFromSearchParams(url.searchParams);
+      if (url.pathname === "/api/versions") {
+        const parsed = parsePackageSpec(url.searchParams.get("pkg") ?? "");
+        const result = await fetchVersions({
+          limit: url.searchParams.get("limit"),
+          packageName: parsed.packageName,
+          sizeOptions,
+        });
+        writeJson(response, 200, { ok: true, result });
+        return true;
+      }
+
       const result = await measure(url.searchParams.get("pkg") ?? "", { sizeOptions });
       writeJson(response, 200, { ok: true, result });
     } catch (error) {
-      const isTypedError = error instanceof PackageSizeError || error instanceof PackageUrlError;
+      const isTypedError = isTypedApiError(error);
       const statusCode = isTypedError ? error.statusCode : 500;
       const code = isTypedError ? error.code : "INTERNAL_ERROR";
       writeJson(response, statusCode, {

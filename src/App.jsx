@@ -10,8 +10,10 @@ import {
   Clipboard,
   Code2,
   Database,
+  Download,
   Gauge,
   GitBranch,
+  History,
   Link2,
   Loader2,
   Moon,
@@ -20,26 +22,47 @@ import {
   Search,
   SunMedium,
   Terminal,
+  TrendingUp,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  buildNpmMaintainerUrl,
+  buildNpmPackageUrl,
+  buildNpmRegistryPackageUrl,
+  buildNpmScopeUrl,
   buildEsmUnpkgUrl,
   buildSizeApiSearchParams,
   buildUnpkgSearchParams,
+  compareStableVersionsDesc,
   DEFAULT_SIZE_OPTIONS,
+  isStableVersion,
   normalizeSizeOptions,
+  npmPackageScope,
+  parsePackageSpec,
   packageSpecFromResolved,
+  sizeOptionsSignature,
   sizeOptionsFromSearchParams,
 } from "./package-url.js";
 import { measurePackageSizeInBrowser } from "./browser-measure.js";
+import {
+  readBrowserCachedPackageHistory,
+  readBrowserMeasurement,
+  readBrowserVersionHistory,
+  writeBrowserMeasurement,
+  writeBrowserVersionHistory,
+} from "./browser-cache.js";
 
 const RECENTS_KEY = "package-size.recent-searches.v2";
 const LEGACY_RECENTS_KEY = "package-size.recent-searches.v1";
 const THEME_KEY = "package-size.theme.v1";
 const MAX_RECENTS = 8;
+const DEFAULT_VERSION_HISTORY_LIMIT = 5;
+const VERSION_HISTORY_PAGE_SIZE = 5;
+const MAX_VERSION_HISTORY = 100;
 const DEFAULT_QUERY = "react";
 const URL_BUILDER_POPOVER_ID = "url-builder-popover";
+const VERSION_HISTORY_GRAPH_KEY = "package-size.version-history.graph.v1";
 
 const conditionOptions = ["browser", "react-server", "worker"];
 const pageRoutes = createRouteRegistry({
@@ -178,6 +201,35 @@ function smallerBy(rawBytes, compressedBytes) {
   return `${(100 * (1 - compressedBytes / rawBytes)).toFixed(1)}% smaller`;
 }
 
+function formatHistorySize(bytes) {
+  if (typeof bytes !== "number") {
+    return "Not loaded";
+  }
+  return formatKiB(bytes);
+}
+
+function trendTone(delta) {
+  if (delta > 0) {
+    return {
+      label: `+${formatKiB(delta)}`,
+      stroke: "#b95000",
+      text: "text-[#b95000] dark:text-[#ffb86b]",
+    };
+  }
+  if (delta < 0) {
+    return {
+      label: `-${formatKiB(Math.abs(delta))}`,
+      stroke: "#178a45",
+      text: "text-[#178a45] dark:text-[#00ba7c]",
+    };
+  }
+  return {
+    label: "No change",
+    stroke: "#1d9bf0",
+    text: "text-[#5b6678] dark:text-[#8b98a5]",
+  };
+}
+
 function relativeTime(isoDate) {
   const elapsedSeconds = Math.max(0, Math.floor((Date.now() - new Date(isoDate).getTime()) / 1000));
   if (elapsedSeconds < 60) {
@@ -193,6 +245,54 @@ function relativeTime(isoDate) {
   }
   return `${Math.floor(hours / 24)}d ago`;
 }
+
+function formatDate(isoDate) {
+  if (!isoDate) {
+    return "Unknown";
+  }
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown";
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function loadedTrendEntries(entries) {
+  return entries
+    .filter((entry) => (
+      entry?.loaded &&
+      isStableVersion(entry.version) &&
+      typeof entry.rawBytes === "number" &&
+      typeof entry.gzipBytes === "number" &&
+      typeof entry.brotliBytes === "number"
+    ))
+    .sort((left, right) => compareStableVersionsDesc(right.version, left.version));
+}
+
+const sizeTrendSeries = [
+  {
+    key: "rawBytes",
+    label: "Minified",
+    color: "#1d9bf0",
+    text: toneStyles.minified.text,
+  },
+  {
+    key: "gzipBytes",
+    label: "Gzip",
+    color: "#1f7ae8",
+    text: toneStyles.gzip.text,
+  },
+  {
+    key: "brotliBytes",
+    label: "Brotli",
+    color: "#e58a00",
+    text: toneStyles.brotli.text,
+  },
+];
 
 function packageInitial(packageName) {
   if (packageName.startsWith("@")) {
@@ -210,6 +310,25 @@ function getPreferredTheme() {
     return savedTheme;
   }
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function getPreferredVersionHistoryGraph() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  try {
+    return window.localStorage.getItem(VERSION_HISTORY_GRAPH_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function writeVersionHistoryGraphPreference(showGraph) {
+  try {
+    window.localStorage.setItem(VERSION_HISTORY_GRAPH_KEY, showGraph ? "true" : "false");
+  } catch {
+    // Graph visibility is a UI preference, so storage failures should not block the toggle.
+  }
 }
 
 function normalizeStoredRecent(recent) {
@@ -255,6 +374,229 @@ function writeRecents(recents) {
   window.localStorage.setItem(RECENTS_KEY, JSON.stringify(recents));
 }
 
+function sameSizeOptions(left, right) {
+  try {
+    return sizeOptionsSignature(left) === sizeOptionsSignature(right);
+  } catch {
+    return false;
+  }
+}
+
+function historyContextKey(result) {
+  if (!result?.package) {
+    return "";
+  }
+  return `${result.package}|${sizeOptionsSignature(result.options ?? {})}`;
+}
+
+function historyEntryFromMeasurement(measurement, extra = {}) {
+  if (
+    !measurement?.package ||
+    !measurement?.version ||
+    typeof measurement.rawBytes !== "number" ||
+    typeof measurement.gzipBytes !== "number" ||
+    typeof measurement.brotliBytes !== "number"
+  ) {
+    return null;
+  }
+
+  let options;
+  try {
+    options = normalizeSizeOptions(measurement.options ?? {});
+  } catch {
+    return null;
+  }
+
+  return {
+    package: measurement.package,
+    version: measurement.version,
+    requestUrl: measurement.requestUrl ?? measurement.resolvedUrl,
+    resolvedUrl: measurement.resolvedUrl,
+    rawBytes: measurement.rawBytes,
+    gzipBytes: measurement.gzipBytes,
+    brotliBytes: measurement.brotliBytes,
+    measuredAt: measurement.measuredAt,
+    cachedAt: measurement.cachedAt,
+    publishedAt: extra.publishedAt ?? measurement.publishedAt ?? null,
+    options,
+    loaded: true,
+  };
+}
+
+function normalizeVersionRow(row) {
+  if (!row?.version || !isStableVersion(row.version)) {
+    return null;
+  }
+
+  const measured = historyEntryFromMeasurement(row, {
+    publishedAt: row.publishedAt,
+  });
+  if (measured) {
+    return measured;
+  }
+
+  return {
+    package: row.package,
+    version: row.version,
+    publishedAt: row.publishedAt ?? null,
+    loaded: false,
+  };
+}
+
+function localHistoryEntries(recents, result) {
+  const entries = [historyEntryFromMeasurement(result)];
+  entries.push(
+    ...recents
+      .filter((recent) => (
+        recent.package === result.package &&
+        sameSizeOptions(recent.options, result.options)
+      ))
+      .map((recent) => historyEntryFromMeasurement(recent)),
+  );
+
+  return entries.filter((entry) => entry && isStableVersion(entry.version));
+}
+
+function publicMaintainers(metadata) {
+  if (!Array.isArray(metadata?.maintainers)) {
+    return [];
+  }
+
+  return metadata.maintainers
+    .map((maintainer) => (
+      typeof maintainer === "string"
+        ? maintainer
+        : maintainer?.name
+    ))
+    .map((name) => String(name ?? "").trim())
+    .filter((name) => /^[a-z0-9][a-z0-9._~-]*$/i.test(name))
+    .map((name) => ({
+      name,
+      url: buildNpmMaintainerUrl(name),
+    }))
+    .sort(compareMaintainers);
+}
+
+function compareMaintainers(left, right) {
+  const leftIsPatrick = String(left.name ?? "").toLowerCase() === "patrickjs";
+  const rightIsPatrick = String(right.name ?? "").toLowerCase() === "patrickjs";
+  if (leftIsPatrick) {
+    return rightIsPatrick ? 0 : -1;
+  }
+  if (rightIsPatrick) {
+    return 1;
+  }
+  return 0;
+}
+
+function npmPackageMetadata(packageName, metadata = {}) {
+  const registryMetadata = metadata ?? {};
+  const scope = npmPackageScope(packageName);
+  return {
+    packageUrl: registryMetadata.packageUrl ?? buildNpmPackageUrl(packageName),
+    scope: registryMetadata.scope ?? scope,
+    scopeUrl: registryMetadata.scopeUrl ?? buildNpmScopeUrl(packageName),
+    maintainers: [...(registryMetadata.maintainers ?? publicMaintainers(registryMetadata))]
+      .sort(compareMaintainers),
+  };
+}
+
+function dedupeHistoryEntries(entries) {
+  const byVersion = new Map();
+  for (const entry of entries) {
+    if (!entry?.version || !isStableVersion(entry.version)) {
+      continue;
+    }
+    const current = byVersion.get(entry.version);
+    if (!current || entry.loaded || !current.loaded) {
+      byVersion.set(entry.version, entry);
+    }
+  }
+  return [...byVersion.values()].sort((left, right) => (
+    compareStableVersionsDesc(left.version, right.version)
+  ));
+}
+
+function mergeVersionRows(rows, localEntries) {
+  const localByVersion = new Map(
+    localEntries.map((entry) => [entry.version, entry]),
+  );
+  const merged = rows
+    .map((row) => {
+      const normalized = normalizeVersionRow(row);
+      if (!normalized) {
+        return null;
+      }
+
+      const local = localByVersion.get(normalized.version);
+      return local
+        ? {
+            ...normalized,
+            ...local,
+            publishedAt: normalized.publishedAt ?? local.publishedAt,
+            loaded: true,
+          }
+        : normalized;
+    })
+    .filter(Boolean);
+
+  return merged;
+}
+
+function mergeMeasuredHistoryEntry(entries, measurement) {
+  const measured = historyEntryFromMeasurement(measurement);
+  if (!measured || !isStableVersion(measured.version)) {
+    return entries;
+  }
+
+  const existing = entries.find((entry) => entry.version === measured.version);
+  return dedupeHistoryEntries([
+    ...entries.filter((entry) => entry.version !== measured.version),
+    {
+      ...existing,
+      ...measured,
+      publishedAt: existing?.publishedAt ?? measured.publishedAt,
+      loaded: true,
+    },
+  ]);
+}
+
+async function fetchRegistryVersionRows(packageName, limit = DEFAULT_VERSION_HISTORY_LIMIT) {
+  const response = await fetch(buildNpmRegistryPackageUrl(packageName), {
+    headers: {
+      accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error("Version history is unavailable.");
+  }
+
+  const metadata = await response.json();
+  const versions = metadata?.versions;
+  if (!versions || typeof versions !== "object" || Array.isArray(versions)) {
+    throw new Error("Version history is unavailable.");
+  }
+
+  const time = metadata?.time && typeof metadata.time === "object" ? metadata.time : {};
+  const stableVersions = Object.keys(versions)
+    .filter(isStableVersion)
+    .sort(compareStableVersionsDesc);
+
+  return {
+    hasMore: stableVersions.length > limit,
+    npm: npmPackageMetadata(packageName, metadata),
+    versions: stableVersions
+      .slice(0, limit)
+      .map((version) => ({
+        package: packageName,
+        version,
+        publishedAt: time[version] ?? null,
+        loaded: false,
+      })),
+  };
+}
+
 function normalizeResultForRecent(result) {
   const options = normalizeSizeOptions(result.options ?? {});
   return {
@@ -274,22 +616,131 @@ function normalizeResultForRecent(result) {
 
 async function fetchPackageSize(query, sizeOptions) {
   const params = buildSizeApiSearchParams(query, sizeOptions);
-  const response = await fetch(`/api/size?${params.toString()}`, {
-    headers: {
-      accept: "application/json",
-    },
-  });
-  const contentType = response.headers.get("content-type") ?? "";
+  let response;
+  try {
+    response = await fetch(`/api/size?${params.toString()}`, {
+      headers: {
+        accept: "application/json",
+      },
+    });
+  } catch {
+    response = null;
+  }
 
-  if (contentType.includes("application/json")) {
+  const contentType = response?.headers.get("content-type") ?? "";
+  if (response && contentType.includes("application/json")) {
     const payload = await response.json();
     if (!response.ok || !payload.ok) {
       throw new Error(payload.error?.message ?? "Package size request failed.");
     }
+    await writeBrowserMeasurement(payload.result);
     return payload.result;
   }
 
-  return measurePackageSizeInBrowser(query, sizeOptions);
+  const cached = await readBrowserMeasurement(query, sizeOptions);
+  if (cached) {
+    return cached;
+  }
+
+  const result = await measurePackageSizeInBrowser(query, sizeOptions);
+  await writeBrowserMeasurement(result);
+  return result;
+}
+
+async function enrichVersionHistoryWithBrowserCache(
+  history,
+  packageName,
+  sizeOptions,
+  browserEntries,
+) {
+  const localEntries = browserEntries ?? await readBrowserCachedPackageHistory({
+    packageName,
+    sizeOptions,
+  });
+  return {
+    ...history,
+    package: history.package ?? packageName,
+    npm: npmPackageMetadata(packageName, history.npm),
+    versions: mergeVersionRows(history.versions ?? [], localEntries),
+  };
+}
+
+async function fetchPackageVersionHistory(
+  query,
+  sizeOptions,
+  {
+    browserEntries,
+    cachedHistory,
+    limit = DEFAULT_VERSION_HISTORY_LIMIT,
+  } = {},
+) {
+  const parsed = parsePackageSpec(query);
+  const requestedLimit = Math.min(MAX_VERSION_HISTORY, Math.max(1, limit));
+  const params = buildSizeApiSearchParams(parsed.packageName, sizeOptions);
+  params.set("limit", String(requestedLimit));
+  let response;
+  try {
+    response = await fetch(`/api/versions?${params.toString()}`, {
+      headers: {
+        accept: "application/json",
+      },
+    });
+  } catch {
+    response = null;
+  }
+  const contentType = response?.headers.get("content-type") ?? "";
+
+  if (response && contentType.includes("application/json")) {
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error?.message ?? "Version history is unavailable.");
+    }
+    const history = await enrichVersionHistoryWithBrowserCache(
+      payload.result,
+      parsed.packageName,
+      sizeOptions,
+      browserEntries,
+    );
+    await writeBrowserVersionHistory({
+      packageName: parsed.packageName,
+      sizeOptions,
+      limit: requestedLimit,
+      history,
+    });
+    return history;
+  }
+
+  const cached = cachedHistory ?? await readBrowserVersionHistory({
+    packageName: parsed.packageName,
+    sizeOptions,
+    limit: requestedLimit,
+  });
+  if (cached) {
+    return enrichVersionHistoryWithBrowserCache(
+      cached,
+      parsed.packageName,
+      sizeOptions,
+      browserEntries,
+    );
+  }
+
+  const registryHistory = {
+    package: parsed.packageName,
+    ...(await fetchRegistryVersionRows(parsed.packageName, requestedLimit)),
+  };
+  const history = await enrichVersionHistoryWithBrowserCache(
+    registryHistory,
+    parsed.packageName,
+    sizeOptions,
+    browserEntries,
+  );
+  await writeBrowserVersionHistory({
+    packageName: parsed.packageName,
+    sizeOptions,
+    limit: requestedLimit,
+    history,
+  });
+  return history;
 }
 
 function BrandMark() {
@@ -686,7 +1137,65 @@ function resultKind(result) {
   return result.options?.meta ? "Resolved metadata" : "Resolved browser artifact";
 }
 
-function ResultHeader({ result, loading, onRefresh }) {
+function NpmMark() {
+  return (
+    <span
+      className="inline-grid h-[18px] w-[30px] place-items-center rounded-[3px] bg-[#cb3837] text-[11px] leading-none font-black tracking-normal text-white"
+      aria-hidden="true"
+    >
+      npm
+    </span>
+  );
+}
+
+function PackageRegistryLinks({ metadata, packageName }) {
+  const npm = npmPackageMetadata(packageName, metadata);
+  const maintainers = npm.maintainers.slice(0, 8);
+
+  return (
+    <div className="mt-3 flex max-w-[780px] flex-wrap items-center gap-2 text-[14px] font-[650]">
+      <a
+        className="inline-flex h-8 items-center gap-2 rounded-[7px] border border-[#cbd4de] bg-white px-2.5 text-[#263241] no-underline hover:bg-[#f5f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] dark:border-[#38444d] dark:bg-[#192734] dark:text-[#f7f9f9] dark:hover:bg-[#253341] dark:focus-visible:outline-[#1d9bf0]"
+        href={npm.packageUrl}
+        rel="noreferrer"
+        target="_blank"
+        aria-label={`View ${packageName} on npm`}
+      >
+        <NpmMark />
+        <span>Package</span>
+      </a>
+      {npm.scope && npm.scopeUrl ? (
+        <a
+          className="inline-flex h-8 items-center rounded-[7px] border border-[#cbd4de] bg-white px-2.5 text-[#263241] no-underline hover:bg-[#f5f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] dark:border-[#38444d] dark:bg-[#192734] dark:text-[#f7f9f9] dark:hover:bg-[#253341] dark:focus-visible:outline-[#1d9bf0]"
+          href={npm.scopeUrl}
+          rel="noreferrer"
+          target="_blank"
+          aria-label={`View @${npm.scope} scope on npm`}
+        >
+          @{npm.scope}
+        </a>
+      ) : null}
+      {maintainers.length ? (
+        <>
+          <span className="text-[#5b6678] dark:text-[#8b98a5]">Maintainers</span>
+          {maintainers.map((maintainer) => (
+            <a
+              className="inline-flex h-8 items-center rounded-[7px] border border-[#cbd4de] bg-white px-2.5 text-[#263241] no-underline hover:bg-[#f5f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] dark:border-[#38444d] dark:bg-[#192734] dark:text-[#f7f9f9] dark:hover:bg-[#253341] dark:focus-visible:outline-[#1d9bf0]"
+              href={maintainer.url}
+              key={maintainer.name}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {maintainer.name}
+            </a>
+          ))}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function ResultHeader({ packageMetadata, result, loading, onRefresh }) {
   return (
     <section
       className="mb-7 flex items-start justify-between gap-6 max-[980px]:flex-col max-[980px]:items-stretch"
@@ -711,6 +1220,7 @@ function ResultHeader({ result, loading, onRefresh }) {
           <span className="h-[18px] w-px bg-[#d9e0e7] dark:bg-[#38444d]" aria-hidden="true" />
           <span>{result.source}</span>
         </div>
+        <PackageRegistryLinks metadata={packageMetadata} packageName={result.package} />
       </div>
       <div className="flex items-center gap-2.5 pt-2.5 text-sm whitespace-nowrap text-[#263241] dark:text-[#f7f9f9] max-[980px]:pt-0">
         <span className="h-[7px] w-[7px] rounded-full bg-[#25b253] dark:bg-[#00ba7c]" aria-hidden="true" />
@@ -823,6 +1333,379 @@ function MetricsPanel({ result }) {
         />
       </div>
       <CompressionChart result={result} />
+    </section>
+  );
+}
+
+function VersionSizeTrendChart({ entries }) {
+  const rows = loadedTrendEntries(entries);
+  const width = 720;
+  const height = 240;
+  const padding = {
+    top: 22,
+    right: 24,
+    bottom: 46,
+    left: 70,
+  };
+  const innerWidth = width - padding.left - padding.right;
+  const innerHeight = height - padding.top - padding.bottom;
+  const maxValue = Math.max(
+    1,
+    ...rows.flatMap((row) => sizeTrendSeries.map((series) => row[series.key])),
+  );
+  const xFor = (index) => (
+    rows.length <= 1
+      ? padding.left + innerWidth / 2
+      : padding.left + (index / (rows.length - 1)) * innerWidth
+  );
+  const yFor = (value) => padding.top + ((maxValue - value) / maxValue) * innerHeight;
+  const lineSeries = sizeTrendSeries.map((series) => ({
+    ...series,
+    points: rows.map((row, index) => ({
+      version: row.version,
+      value: row[series.key],
+      x: xFor(index),
+      y: yFor(row[series.key]),
+    })),
+  }));
+  const latest = rows.at(-1);
+  const previous = rows.at(-2);
+  const latestSummaries = latest
+    ? sizeTrendSeries.map((series) => {
+        const delta = previous ? latest[series.key] - previous[series.key] : 0;
+        return {
+          ...series,
+          delta,
+          tone: trendTone(delta),
+          value: latest[series.key],
+        };
+      })
+    : [];
+  const labelIndexes = new Set([
+    0,
+    Math.floor((rows.length - 1) / 2),
+    rows.length - 1,
+  ]);
+  const yAxisLabels = [
+    { label: formatKiB(maxValue), value: maxValue },
+    { label: formatKiB(maxValue / 2), value: maxValue / 2 },
+    { label: "0", value: 0 },
+  ];
+
+  return (
+    <div className="mb-5 rounded-[7px] border border-[#d9e0e7] bg-white px-4 py-4 dark:border-[#38444d] dark:bg-[#192734]">
+      <div className="mb-3 flex items-center justify-between gap-3 max-[680px]:flex-col max-[680px]:items-start">
+        <div>
+          <h3 className="m-0 text-[18px] font-extrabold text-[#111827] dark:text-[#f7f9f9]">Loaded size trend</h3>
+          <p className="m-0 mt-1 text-sm font-[650] text-[#5b6678] dark:text-[#8b98a5]">
+            {rows.length} loaded {rows.length === 1 ? "version" : "versions"}
+          </p>
+        </div>
+        {latest ? (
+          <div className="flex flex-wrap justify-end gap-2 max-[680px]:justify-start">
+            <span className="inline-flex h-7 items-center rounded-[5px] border border-[#d9e0e7] px-2 text-sm font-bold text-[#354153] dark:border-[#38444d] dark:text-[#d6dde4]">
+              {latest.version}
+            </span>
+            {latestSummaries.map((summary) => (
+              <span
+                className={`inline-flex h-7 items-center gap-1.5 rounded-[5px] border border-[#d9e0e7] px-2 text-sm font-bold dark:border-[#38444d] ${summary.text}`}
+                key={summary.key}
+              >
+                <i
+                  className="h-2.5 w-2.5 rounded-[2px]"
+                  style={{ backgroundColor: summary.color }}
+                  aria-hidden="true"
+                />
+                {summary.label} {formatKiB(summary.value)}
+                {previous ? (
+                  <em className={`${summary.tone.text} not-italic`}>
+                    {summary.tone.label}
+                  </em>
+                ) : null}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <span className="text-sm font-bold text-[#5b6678] dark:text-[#8b98a5]">
+            Measure another version for change
+          </span>
+        )}
+      </div>
+      <div className="mb-3 flex flex-wrap items-center gap-4 text-[13px] font-bold text-[#5b6678] dark:text-[#8b98a5]">
+        {sizeTrendSeries.map((series) => (
+          <span className="inline-flex items-center gap-2" key={series.key}>
+            <i
+              className="h-3 w-3 rounded-[2px]"
+              style={{ backgroundColor: series.color }}
+              aria-hidden="true"
+            />
+            {series.label}
+          </span>
+        ))}
+      </div>
+      {rows.length ? (
+        <svg
+          className="block h-[240px] w-full overflow-visible"
+          role="img"
+          aria-label="Loaded version size graph"
+          viewBox={`0 0 ${width} ${height}`}
+        >
+          <line
+            x1={padding.left}
+            x2={padding.left}
+            y1={padding.top}
+            y2={padding.top + innerHeight}
+            stroke="currentColor"
+            className="text-[#d9e0e7] dark:text-[#38444d]"
+          />
+          <line
+            x1={padding.left}
+            x2={padding.left + innerWidth}
+            y1={padding.top + innerHeight}
+            y2={padding.top + innerHeight}
+            stroke="currentColor"
+            className="text-[#d9e0e7] dark:text-[#38444d]"
+          />
+          {yAxisLabels.map((tick) => {
+            const y = yFor(tick.value);
+            return (
+              <g key={tick.label}>
+                <line
+                  x1={padding.left}
+                  x2={padding.left + innerWidth}
+                  y1={y}
+                  y2={y}
+                  stroke="currentColor"
+                  strokeDasharray={tick.value === 0 ? undefined : "4 6"}
+                  className="text-[#edf1f5] dark:text-[#253341]"
+                />
+                <text x="0" y={y + 4} className="fill-[#5b6678] text-[12px] dark:fill-[#8b98a5]">
+                  {tick.label}
+                </text>
+              </g>
+            );
+          })}
+          {lineSeries.map((series) => {
+            const path = series.points
+              .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`)
+              .join(" ");
+            return (
+              <g key={series.key}>
+                {series.points.length > 1 ? (
+                  <path
+                    d={path}
+                    fill="none"
+                    stroke={series.color}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="3.5"
+                  />
+                ) : null}
+                {series.points.map((point) => (
+                  <circle
+                    key={`${series.key}-${point.version}`}
+                    cx={point.x}
+                    cy={point.y}
+                    r="5"
+                    fill={series.color}
+                    stroke="white"
+                    strokeWidth="2"
+                    className="dark:stroke-[#192734]"
+                  >
+                    <title>{`${point.version} ${series.label}: ${formatKiB(point.value)}`}</title>
+                  </circle>
+                ))}
+              </g>
+            );
+          })}
+          {rows.map((row, index) => (
+            labelIndexes.has(index) ? (
+              <text
+                className="fill-[#5b6678] text-[12px] font-bold dark:fill-[#8b98a5]"
+                key={`${row.version}-label`}
+                textAnchor={index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle"}
+                x={xFor(index)}
+                y={height - 12}
+              >
+                {row.version}
+              </text>
+            ) : null
+          ))}
+        </svg>
+      ) : (
+        <div className="flex min-h-[150px] items-center justify-center border-y border-[#e1e7ed] font-[650] text-[#5b6678] dark:border-[#38444d] dark:text-[#8b98a5]">
+          No loaded version sizes yet.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function VersionHistoryPanel({ result, state, onLoadMore, onSelect, onTestVisible, testing }) {
+  const entries = state.entries ?? [];
+  const graphSourceEntries = state.graphEntries ?? entries;
+  const isLoading = state.status === "loading";
+  const isRefreshing = Boolean(state.refreshing);
+  const showLoadingPanel = isLoading && !entries.length;
+  const hasLoaded = state.status === "loaded" || state.status === "error";
+  const canLoadMore = hasLoaded && state.hasMore;
+  const [showGraph, setShowGraph] = useState(getPreferredVersionHistoryGraph);
+  const graphEntries = useMemo(() => loadedTrendEntries(graphSourceEntries), [graphSourceEntries]);
+  const canShowGraph = hasLoaded && graphEntries.length > 0;
+  const toggleGraph = () => {
+    setShowGraph((current) => {
+      const next = !current;
+      writeVersionHistoryGraphPreference(next);
+      return next;
+    });
+  };
+
+  return (
+    <section className="mb-[34px] border-b border-[#d9e0e7] pb-8 dark:border-[#38444d]" aria-label="Version history">
+      <div className="mb-[18px] flex items-center justify-between gap-4">
+        <div>
+          <h2 className="m-0 text-[23px] font-extrabold text-[#111827] dark:text-[#f7f9f9]">Version history</h2>
+          {graphEntries.length ? (
+            <p className="m-0 mt-1 text-sm font-[650] text-[#5b6678] dark:text-[#8b98a5]">
+              {graphEntries.length} local measurements
+            </p>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-2 max-[680px]:flex-wrap max-[680px]:justify-end">
+          {entries.length ? (
+            <button
+              className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-[#cbd4de] bg-white px-3.5 text-[15px] font-bold text-[#1d9bf0] hover:bg-[#f5f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] disabled:cursor-wait disabled:opacity-80 dark:border-[#38444d] dark:bg-[#192734] dark:text-[#8ecdf8] dark:hover:bg-[#253341] dark:focus-visible:outline-[#1d9bf0]"
+              type="button"
+              onClick={onTestVisible}
+              disabled={testing}
+              aria-label="Reload and test visible versions"
+            >
+              {testing ? <Loader2 className="animate-spin" size={18} /> : <RotateCcw size={18} />}
+              <span>{testing ? "Testing" : "Reload/test"}</span>
+            </button>
+          ) : null}
+          {canShowGraph ? (
+            <button
+              className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-[#cbd4de] bg-white px-3.5 text-[15px] font-bold text-[#1d9bf0] hover:bg-[#f5f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] dark:border-[#38444d] dark:bg-[#192734] dark:text-[#8ecdf8] dark:hover:bg-[#253341] dark:focus-visible:outline-[#1d9bf0]"
+              type="button"
+              onClick={toggleGraph}
+              aria-pressed={showGraph}
+            >
+              <TrendingUp size={18} />
+              <span>{showGraph ? "Hide graph" : "Show graph"}</span>
+            </button>
+          ) : null}
+          <span className="inline-flex h-10 items-center gap-2 rounded-[7px] border border-[#cbd4de] bg-white px-3.5 text-[15px] font-bold text-[#1d9bf0] dark:border-[#38444d] dark:bg-[#192734] dark:text-[#8ecdf8]">
+            {showLoadingPanel || isRefreshing ? <Loader2 className="animate-spin" size={18} /> : <History size={18} />}
+            <span>{showLoadingPanel ? "Loading" : isRefreshing ? "Refreshing" : "Stable releases"}</span>
+          </span>
+        </div>
+      </div>
+
+      {state.status === "error" ? (
+        <div
+          className="mb-4 rounded-[7px] border border-[#fac9be] bg-[#fff4f1] px-3.5 py-[11px] text-[15px] font-semibold text-[#a43d28] dark:border-[#8c3d32] dark:bg-[#3a2526] dark:text-[#ffb4a8]"
+          role="alert"
+        >
+          {state.message}
+        </div>
+      ) : null}
+
+      {showLoadingPanel ? (
+        <div className="flex min-h-[92px] items-center justify-center gap-2.5 border-y border-[#e1e7ed] font-[650] text-[#5b6678] dark:border-[#38444d] dark:text-[#8b98a5]">
+          <Loader2 className="animate-spin" size={22} />
+          <span>Loading version history</span>
+        </div>
+      ) : null}
+
+      {!showLoadingPanel && showGraph && canShowGraph ? (
+        <VersionSizeTrendChart entries={graphSourceEntries} />
+      ) : null}
+
+      {!showLoadingPanel && (hasLoaded || entries.length) && entries.length ? (
+        <div className="overflow-x-auto max-[680px]:overflow-visible">
+          <table className="w-full min-w-[820px] border-collapse max-[680px]:min-w-0">
+            <thead className="max-[680px]:hidden">
+              <tr>
+                <th className={thClass}>Version</th>
+                <th className={thClass}>Minified</th>
+                <th className={thClass}>Gzip</th>
+                <th className={thClass}>Brotli</th>
+                <th className={thClass}>Published</th>
+                <th className={thClass} aria-label="Action" />
+              </tr>
+            </thead>
+            <tbody className="max-[680px]:grid max-[680px]:gap-3.5">
+              {entries.map((entry) => {
+                const packageSpec = packageSpecFromResolved(entry.package ?? result.package, entry.version);
+                return (
+                  <tr
+                    className="max-[680px]:relative max-[680px]:grid max-[680px]:grid-cols-2 max-[680px]:gap-x-[18px] max-[680px]:gap-y-2.5 max-[680px]:border-b max-[680px]:border-[#e1e7ed] max-[680px]:pt-[13px] max-[680px]:pr-[42px] max-[680px]:pb-3.5 max-[680px]:pl-0 dark:max-[680px]:border-[#38444d]"
+                    key={entry.resolvedUrl ?? packageSpec}
+                  >
+                    <td className={`${tdClass} max-[680px]:col-span-2`}>
+                      <button
+                        className="inline-flex cursor-pointer items-center gap-2.5 border-0 bg-transparent p-0 font-[750] text-[#111827] hover:text-[#0f6fb8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] dark:text-[#f7f9f9] dark:hover:text-[#8ecdf8] dark:focus-visible:outline-[#1d9bf0]"
+                        type="button"
+                        onClick={() => onSelect(packageSpec, result.options)}
+                        aria-label={`Load ${packageSpec} from version history`}
+                      >
+                        {entry.version}
+                      </button>
+                    </td>
+                    <td className={`${tdClass} ${typeof entry.rawBytes === "number" ? toneStyles.minified.text : ""}`}>
+                      <MobileLabel>Minified</MobileLabel>
+                      {formatHistorySize(entry.rawBytes)}
+                    </td>
+                    <td className={`${tdClass} ${typeof entry.gzipBytes === "number" ? toneStyles.gzip.text : ""}`}>
+                      <MobileLabel>Gzip</MobileLabel>
+                      {formatHistorySize(entry.gzipBytes)}
+                    </td>
+                    <td className={`${tdClass} ${typeof entry.brotliBytes === "number" ? toneStyles.brotli.text : ""}`}>
+                      <MobileLabel>Brotli</MobileLabel>
+                      {formatHistorySize(entry.brotliBytes)}
+                    </td>
+                    <td className={tdClass}>
+                      <MobileLabel>Published</MobileLabel>
+                      {formatDate(entry.publishedAt)}
+                    </td>
+                    <td className={`${tdClass} max-[680px]:absolute max-[680px]:top-3 max-[680px]:right-0`}>
+                      <button
+                        className="inline-grid h-8 w-8 place-items-center rounded-[7px] border-0 bg-transparent text-[#657284] hover:bg-[#f5f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] dark:text-[#8b98a5] dark:hover:bg-[#253341] dark:focus-visible:outline-[#1d9bf0]"
+                        type="button"
+                        onClick={() => onSelect(packageSpec, result.options)}
+                        aria-label={`Load ${packageSpec}`}
+                        title={`Load ${packageSpec}`}
+                      >
+                        <Download size={18} />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {canLoadMore ? (
+            <button
+              className="mx-auto mt-5 flex h-10 cursor-pointer items-center justify-center gap-2 rounded-[7px] border border-[#cbd4de] bg-white px-4 text-[15px] font-bold text-[#1d9bf0] hover:bg-[#f5f8fa] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1f7ae8] disabled:cursor-wait disabled:opacity-80 dark:border-[#38444d] dark:bg-[#192734] dark:text-[#8ecdf8] dark:hover:bg-[#253341] dark:focus-visible:outline-[#1d9bf0]"
+              type="button"
+              onClick={onLoadMore}
+              disabled={isLoading}
+              aria-label="Load more version history"
+            >
+              <ChevronDown size={18} />
+              <span>Load more</span>
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {!showLoadingPanel && hasLoaded && !entries.length ? (
+        <div className="flex min-h-[92px] items-center justify-center gap-2.5 border-y border-[#e1e7ed] font-[650] text-[#5b6678] dark:border-[#38444d] dark:text-[#8b98a5]">
+          <History size={24} />
+          <span>No local version history yet.</span>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -958,6 +1841,17 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState("measure");
   const [theme, setTheme] = useState(getPreferredTheme);
+  const [versionHistory, setVersionHistory] = useState({
+    status: "idle",
+    entries: [],
+    graphEntries: [],
+    hasMore: false,
+    limit: DEFAULT_VERSION_HISTORY_LIMIT,
+    loadedFor: "",
+    npm: null,
+    refreshing: false,
+  });
+  const [testingVersionHistory, setTestingVersionHistory] = useState(false);
   const [recents, setRecents] = useState(() => {
     if (typeof window === "undefined") {
       return [];
@@ -965,6 +1859,8 @@ export default function App() {
     return readRecents();
   });
   const didAutoMeasure = useRef(false);
+  const historyRequestId = useRef(0);
+  const historyTestRequestId = useRef(0);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -1012,6 +1908,113 @@ export default function App() {
     });
   }, []);
 
+  const loadVersionHistoryForResult = useCallback(async (
+    nextResult,
+    limit = DEFAULT_VERSION_HISTORY_LIMIT,
+  ) => {
+    const nextLimit = Math.min(MAX_VERSION_HISTORY, Math.max(1, limit));
+    const loadedFor = historyContextKey(nextResult);
+    const immediateLocalEntries = dedupeHistoryEntries(localHistoryEntries(recents, nextResult));
+    const requestId = historyRequestId.current + 1;
+    historyRequestId.current = requestId;
+    const immediateEntries = mergeVersionRows([], immediateLocalEntries);
+
+    setVersionHistory({
+      status: immediateEntries.length ? "loaded" : "loading",
+      entries: immediateEntries,
+      graphEntries: immediateLocalEntries,
+      hasMore: false,
+      limit: nextLimit,
+      loadedFor,
+      npm: npmPackageMetadata(nextResult.package),
+      refreshing: true,
+    });
+
+    try {
+      const [browserEntries, cachedHistory] = await Promise.all([
+        readBrowserCachedPackageHistory({
+          packageName: nextResult.package,
+          sizeOptions: nextResult.options,
+        }),
+        readBrowserVersionHistory({
+          packageName: nextResult.package,
+          sizeOptions: nextResult.options,
+          limit: nextLimit,
+        }),
+      ]);
+      const localEntries = dedupeHistoryEntries([
+        ...immediateLocalEntries,
+        ...browserEntries,
+      ]);
+      if (historyRequestId.current !== requestId) {
+        return;
+      }
+      const cachedEntries = cachedHistory
+        ? mergeVersionRows(cachedHistory.versions ?? [], localEntries)
+        : mergeVersionRows([], localEntries);
+      if (cachedEntries.length) {
+        setVersionHistory({
+          status: "loaded",
+          entries: cachedEntries,
+          graphEntries: dedupeHistoryEntries([
+            ...cachedEntries,
+            ...localEntries,
+          ]),
+          hasMore: Boolean(cachedHistory?.hasMore),
+          limit: nextLimit,
+          loadedFor,
+          npm: npmPackageMetadata(nextResult.package, cachedHistory?.npm),
+          refreshing: true,
+        });
+      }
+      const history = await fetchPackageVersionHistory(nextResult.package, nextResult.options, {
+        browserEntries,
+        cachedHistory,
+        limit: nextLimit,
+      });
+      if (historyRequestId.current !== requestId) {
+        return;
+      }
+      const entries = mergeVersionRows(history.versions ?? [], localEntries);
+      setVersionHistory({
+        status: "loaded",
+        entries,
+        graphEntries: dedupeHistoryEntries([
+          ...entries,
+          ...localEntries,
+        ]),
+        hasMore: Boolean(history.hasMore),
+        limit: nextLimit,
+        loadedFor,
+        npm: npmPackageMetadata(nextResult.package, history.npm),
+        refreshing: false,
+      });
+    } catch (nextError) {
+      if (historyRequestId.current !== requestId) {
+        return;
+      }
+      const browserEntries = await readBrowserCachedPackageHistory({
+        packageName: nextResult.package,
+        sizeOptions: nextResult.options,
+      });
+      const localEntries = dedupeHistoryEntries([
+        ...immediateLocalEntries,
+        ...browserEntries,
+      ]);
+      setVersionHistory({
+        status: "error",
+        entries: mergeVersionRows([], localEntries),
+        graphEntries: dedupeHistoryEntries(localEntries),
+        hasMore: false,
+        limit: nextLimit,
+        loadedFor,
+        npm: npmPackageMetadata(nextResult.package),
+        message: nextError.message || "Version history is unavailable.",
+        refreshing: false,
+      });
+    }
+  }, [recents]);
+
   const runSearch = useCallback(
     async (nextQuery = query, nextOptions = sizeOptions, options = {}) => {
       const trimmed = nextQuery.trim();
@@ -1035,8 +2038,12 @@ export default function App() {
 
       try {
         const nextResult = await fetchPackageSize(trimmed, normalizedOptions);
+        const nextHistoryLimit = versionHistory.loadedFor === historyContextKey(nextResult)
+          ? versionHistory.limit
+          : DEFAULT_VERSION_HISTORY_LIMIT;
         setResult(nextResult);
         saveRecent(nextResult);
+        loadVersionHistoryForResult(nextResult, nextHistoryLimit);
         if (options.history !== false) {
           writeDashboardStateToLocation(trimmed, normalizedOptions, options.history ?? "push");
         }
@@ -1048,7 +2055,7 @@ export default function App() {
         setLoading(false);
       }
     },
-    [query, saveRecent, sizeOptions],
+    [loadVersionHistoryForResult, query, saveRecent, sizeOptions, versionHistory.limit, versionHistory.loadedFor],
   );
 
   useEffect(() => {
@@ -1072,6 +2079,73 @@ export default function App() {
   }, [runSearch]);
 
   const visibleResult = useMemo(() => result ?? sampleResult, [result]);
+  const visiblePackageMetadata = versionHistory.loadedFor === historyContextKey(visibleResult)
+    ? versionHistory.npm
+    : null;
+
+  const loadMoreVersionHistory = useCallback(() => {
+    loadVersionHistoryForResult(
+      visibleResult,
+      Math.min(MAX_VERSION_HISTORY, (versionHistory.limit ?? DEFAULT_VERSION_HISTORY_LIMIT) + VERSION_HISTORY_PAGE_SIZE),
+    );
+  }, [loadVersionHistoryForResult, versionHistory.limit, visibleResult]);
+
+  const testVisibleVersionHistory = useCallback(async () => {
+    if (testingVersionHistory) {
+      return;
+    }
+
+    const visibleEntries = (versionHistory.entries ?? [])
+      .filter((entry) => entry?.version && isStableVersion(entry.version));
+    if (!visibleEntries.length) {
+      return;
+    }
+
+    const unloadedEntries = visibleEntries.filter((entry) => !entry.loaded);
+    const entriesToTest = unloadedEntries.length ? unloadedEntries : visibleEntries;
+    const requestId = historyTestRequestId.current + 1;
+    historyTestRequestId.current = requestId;
+    setTestingVersionHistory(true);
+
+    let firstFailure = "";
+    try {
+      for (const entry of entriesToTest) {
+        if (historyTestRequestId.current !== requestId) {
+          return;
+        }
+
+        const packageSpec = packageSpecFromResolved(entry.package ?? visibleResult.package, entry.version);
+        try {
+          const measured = await fetchPackageSize(packageSpec, visibleResult.options);
+          if (historyTestRequestId.current !== requestId) {
+            return;
+          }
+          setVersionHistory((current) => ({
+            ...current,
+            status: current.status === "idle" ? "loaded" : current.status,
+            entries: mergeMeasuredHistoryEntry(current.entries ?? [], measured),
+            graphEntries: mergeMeasuredHistoryEntry(
+              current.graphEntries?.length ? current.graphEntries : current.entries ?? [],
+              measured,
+            ),
+          }));
+        } catch (nextError) {
+          firstFailure ||= `Failed to test ${packageSpec}: ${nextError.message || "Package size request failed."}`;
+        }
+      }
+    } finally {
+      if (historyTestRequestId.current === requestId) {
+        setTestingVersionHistory(false);
+        if (firstFailure) {
+          setVersionHistory((current) => ({
+            ...current,
+            status: "error",
+            message: firstFailure,
+          }));
+        }
+      }
+    }
+  }, [testingVersionHistory, versionHistory.entries, visibleResult]);
 
   return (
     <div className="min-h-screen min-w-80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(251,252,253,0.9)),radial-gradient(circle_at_25%_0%,rgba(29,155,240,0.07),transparent_32%)] font-sans text-[#111827] antialiased dark:bg-[linear-gradient(180deg,rgba(21,32,43,0.98),rgba(21,32,43,0.94)),radial-gradient(circle_at_25%_0%,rgba(29,155,240,0.10),transparent_34%)] dark:text-[#f7f9f9]">
@@ -1101,10 +2175,19 @@ export default function App() {
             <ErrorMessage message={error} />
             <ResultHeader
               result={visibleResult}
+              packageMetadata={visiblePackageMetadata}
               loading={loading}
               onRefresh={() => runSearch(visibleResult.query, visibleResult.options, { history: "replace" })}
             />
             <MetricsPanel result={visibleResult} />
+            <VersionHistoryPanel
+              result={visibleResult}
+              state={versionHistory}
+              onLoadMore={loadMoreVersionHistory}
+              onSelect={runSearch}
+              onTestVisible={testVisibleVersionHistory}
+              testing={testingVersionHistory}
+            />
             <RecentsTable
               recents={recents}
               onSelect={runSearch}

@@ -14,6 +14,15 @@
   transform: rotate(180deg);
 }
 
+a[target="_blank"]:not([data-no-external-marker])::after {
+  content: "↗";
+  display: inline-block;
+  margin-left: 0.28em;
+  font-size: 0.82em;
+  line-height: 1;
+  transform: translateY(-0.08em);
+}
+
 .url-builder-popover {
   width: min(720px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);

@@ -5,91 +5,14 @@ import {
   parsePackageSpec,
   parseResolvedPackage,
 } from "./package-url.js";
+import {
+  readBrowserMeasurementEntry,
+  writeBrowserMeasurementEntry,
+} from "./browser-cache.js";
 
 const DEFAULT_MAX_BODY_BYTES = 5 * 1024 * 1024;
-const DB_NAME = "package-size";
-const STORE_NAME = "measurements";
-const CACHE_PREFIX = "package-size.browser-cache.v1:";
 
 let brotliModulePromise;
-
-function requestAsPromise(request) {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-function openCacheDb() {
-  if (typeof indexedDB === "undefined") {
-    return Promise.resolve(null);
-  }
-
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: "resolvedUrl" });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-function localStorageKey(resolvedUrl) {
-  return `${CACHE_PREFIX}${resolvedUrl}`;
-}
-
-async function readBrowserCache(resolvedUrl) {
-  try {
-    const db = await openCacheDb();
-    if (db) {
-      try {
-        const transaction = db.transaction(STORE_NAME, "readonly");
-        const entry = await requestAsPromise(transaction.objectStore(STORE_NAME).get(resolvedUrl));
-        db.close();
-        return entry ?? null;
-      } catch {
-        db.close();
-      }
-    }
-  } catch {
-    // Fall back to localStorage below.
-  }
-
-  try {
-    const raw = window.localStorage.getItem(localStorageKey(resolvedUrl));
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-async function writeBrowserCache(entry) {
-  try {
-    const db = await openCacheDb();
-    if (db) {
-      try {
-        const transaction = db.transaction(STORE_NAME, "readwrite");
-        await requestAsPromise(transaction.objectStore(STORE_NAME).put(entry));
-        db.close();
-        return;
-      } catch {
-        db.close();
-      }
-    }
-  } catch {
-    // Fall back to localStorage below.
-  }
-
-  try {
-    window.localStorage.setItem(localStorageKey(entry.resolvedUrl), JSON.stringify(entry));
-  } catch {
-    // Cache writes are best effort in static mode.
-  }
-}
 
 async function gzipByteLength(buffer) {
   if (typeof CompressionStream === "undefined") {
@@ -169,7 +92,7 @@ export async function measurePackageSizeInBrowser(input, options = {}) {
   const requestUrl = buildEsmUnpkgUrl(parsed, sizeOptions);
 
   if (isExactVersion(parsed.version)) {
-    const cached = await readBrowserCache(requestUrl);
+    const cached = await readBrowserMeasurementEntry(requestUrl);
     if (cached) {
       return resultFromCache(cached, { parsed, requestUrl, sizeOptions });
     }
@@ -189,7 +112,7 @@ export async function measurePackageSizeInBrowser(input, options = {}) {
   }
 
   const resolvedUrl = response.url || requestUrl;
-  const cached = await readBrowserCache(resolvedUrl);
+  const cached = await readBrowserMeasurementEntry(resolvedUrl);
   if (cached) {
     return resultFromCache(cached, { parsed, requestUrl, sizeOptions });
   }
@@ -214,7 +137,7 @@ export async function measurePackageSizeInBrowser(input, options = {}) {
     cacheHit: false,
   };
 
-  await writeBrowserCache({
+  await writeBrowserMeasurementEntry({
     schemaVersion: 1,
     cachedAt: now,
     resolvedUrl,

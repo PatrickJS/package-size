@@ -6,6 +6,12 @@ import {
   withJsonStateWrite,
   writeJsonState,
 } from "@async/json";
+import {
+  compareStableVersionsDesc,
+  isStableVersion,
+  normalizeSizeOptions,
+  sizeOptionsSignature,
+} from "../src/package-url.js";
 
 const CACHE_SCHEMA_VERSION = 1;
 const CACHE_FILE_NAME = "measurements.json";
@@ -47,6 +53,52 @@ function normalizeCacheState(state) {
   return state;
 }
 
+function historyEntryFromCacheEntry(entry) {
+  const result = entry?.result;
+  if (
+    !result ||
+    !result.package ||
+    !result.version ||
+    typeof result.rawBytes !== "number" ||
+    typeof result.gzipBytes !== "number" ||
+    typeof result.brotliBytes !== "number"
+  ) {
+    return null;
+  }
+
+  let options;
+  try {
+    options = normalizeSizeOptions(result.options ?? {});
+  } catch {
+    return null;
+  }
+
+  return {
+    package: result.package,
+    version: result.version,
+    requestUrl: result.requestUrl ?? result.resolvedUrl ?? entry.resolvedUrl,
+    resolvedUrl: result.resolvedUrl ?? entry.resolvedUrl,
+    rawBytes: result.rawBytes,
+    gzipBytes: result.gzipBytes,
+    brotliBytes: result.brotliBytes,
+    measuredAt: result.measuredAt,
+    cachedAt: entry.cachedAt,
+    options,
+    loaded: true,
+  };
+}
+
+function sortHistoryEntries(left, right) {
+  const versionOrder = compareStableVersionsDesc(left.version, right.version);
+  if (versionOrder !== 0) {
+    return versionOrder;
+  }
+
+  const rightTime = Date.parse(right.cachedAt ?? right.measuredAt ?? "") || 0;
+  const leftTime = Date.parse(left.cachedAt ?? left.measuredAt ?? "") || 0;
+  return rightTime - leftTime;
+}
+
 async function ensureCacheDir(cacheFile) {
   await fs.mkdir(path.dirname(cacheFile), { recursive: true });
 }
@@ -65,6 +117,25 @@ export async function clearMeasurementCacheFile(cacheFile = defaultMeasurementCa
 export async function readCachedMeasurement(cacheKey, cacheFile = defaultMeasurementCacheFile()) {
   const state = await readMeasurementCache(cacheFile);
   return state.entries[cacheKey] ?? null;
+}
+
+export async function readCachedPackageHistory({
+  cacheFile = defaultMeasurementCacheFile(),
+  packageName,
+  sizeOptions = {},
+} = {}) {
+  const targetSignature = sizeOptionsSignature(sizeOptions);
+  const state = await readMeasurementCache(cacheFile);
+
+  return Object.values(state.entries)
+    .map(historyEntryFromCacheEntry)
+    .filter((entry) => (
+      entry &&
+      entry.package === packageName &&
+      isStableVersion(entry.version) &&
+      sizeOptionsSignature(entry.options) === targetSignature
+    ))
+    .sort(sortHistoryEntries);
 }
 
 export async function writeCachedMeasurement(

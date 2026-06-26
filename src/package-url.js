@@ -1,4 +1,6 @@
 export const SOURCE_ORIGIN = "https://esm.unpkg.com";
+export const NPM_REGISTRY_ORIGIN = "https://registry.npmjs.org";
+export const NPM_WEB_ORIGIN = "https://www.npmjs.com";
 
 export const DEFAULT_SIZE_OPTIONS = Object.freeze({
   subpath: "",
@@ -123,6 +125,26 @@ export function isExactVersion(version) {
   );
 }
 
+export function isStableVersion(version) {
+  return /^\d+\.\d+\.\d+$/.test(String(version ?? ""));
+}
+
+export function compareStableVersionsDesc(left, right) {
+  const leftMatch = String(left ?? "").match(/^(\d+)\.(\d+)\.(\d+)$/);
+  const rightMatch = String(right ?? "").match(/^(\d+)\.(\d+)\.(\d+)$/);
+  if (!leftMatch || !rightMatch) {
+    return 0;
+  }
+
+  for (let index = 1; index <= 3; index += 1) {
+    const order = Number(rightMatch[index]) - Number(leftMatch[index]);
+    if (order !== 0) {
+      return order;
+    }
+  }
+  return 0;
+}
+
 export function normalizeSizeOptions(input = {}) {
   const target = String(input.target ?? DEFAULT_SIZE_OPTIONS.target).trim();
   if (!VALID_TARGETS.has(target)) {
@@ -161,8 +183,61 @@ export function normalizeSizeOptions(input = {}) {
   };
 }
 
+export function sizeOptionsSignature(sizeOptions = {}) {
+  const options = normalizeSizeOptions(sizeOptions);
+  return JSON.stringify({
+    subpath: options.subpath,
+    target: options.target,
+    conditions: options.conditions,
+    env: options.env,
+    bundle: options.bundle,
+    min: options.min,
+    sourcemap: options.sourcemap,
+    meta: options.meta,
+  });
+}
+
 export function packageSpecFromResolved(packageName, version) {
   return version ? `${packageName}@${version}` : packageName;
+}
+
+function npmWebOrigin(origin) {
+  return String(origin ?? NPM_WEB_ORIGIN).replace(/\/+$/, "");
+}
+
+function encodedPackagePath(packageName) {
+  const parsed = parsePackageSpec(packageName);
+  return parsed.packageName
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+export function buildNpmRegistryPackageUrl(packageName, registryOrigin = NPM_REGISTRY_ORIGIN) {
+  const parsed = parsePackageSpec(packageName);
+  const origin = String(registryOrigin ?? NPM_REGISTRY_ORIGIN).replace(/\/+$/, "");
+  return `${origin}/${encodeURIComponent(parsed.packageName)}`;
+}
+
+export function npmPackageScope(packageName) {
+  const parsed = parsePackageSpec(packageName);
+  if (!parsed.packageName.startsWith("@")) {
+    return null;
+  }
+  return parsed.packageName.slice(1).split("/")[0] || null;
+}
+
+export function buildNpmPackageUrl(packageName, webOrigin = NPM_WEB_ORIGIN) {
+  return `${npmWebOrigin(webOrigin)}/package/${encodedPackagePath(packageName)}`;
+}
+
+export function buildNpmScopeUrl(packageName, webOrigin = NPM_WEB_ORIGIN) {
+  const scope = npmPackageScope(packageName);
+  return scope ? `${npmWebOrigin(webOrigin)}/org/${encodeURIComponent(scope)}` : null;
+}
+
+export function buildNpmMaintainerUrl(name, webOrigin = NPM_WEB_ORIGIN) {
+  return `${npmWebOrigin(webOrigin)}/~${encodeURIComponent(String(name ?? "").trim())}`;
 }
 
 function formatSearchParams(params) {

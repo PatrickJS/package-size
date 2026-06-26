@@ -6,8 +6,10 @@ import { PackageSizeError } from "../server/size-service.js";
 
 const servers = [];
 
-async function startServer(measure) {
-  const handler = createSizeApiHandler({ measure });
+async function startServer(options) {
+  const handler = createSizeApiHandler(
+    typeof options === "function" ? { measure: options } : options,
+  );
   const server = http.createServer(async (request, response) => {
     if (!(await handler(request, response))) {
       response.writeHead(404);
@@ -97,6 +99,54 @@ describe("size API", () => {
       error: {
         code: "INVALID_PACKAGE_SPEC",
         message: "Invalid package.",
+      },
+    });
+  });
+
+  it("returns version history data", async () => {
+    let observed;
+    const baseUrl = await startServer({
+      fetchVersions: async (options) => {
+        observed = options;
+        return {
+          package: options.packageName,
+          versions: [
+            {
+              package: "react",
+              version: "19.2.7",
+              publishedAt: "2026-06-01T00:00:00.000Z",
+              loaded: false,
+            },
+          ],
+        };
+      },
+      measure: async () => ({}),
+    });
+
+    const response = await fetch(`${baseUrl}/api/versions?pkg=react&target=es2020&limit=1`);
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(observed).toMatchObject({
+      limit: "1",
+      packageName: "react",
+      sizeOptions: {
+        target: "es2020",
+        conditions: ["browser"],
+      },
+    });
+    expect(payload).toEqual({
+      ok: true,
+      result: {
+        package: "react",
+        versions: [
+          {
+            package: "react",
+            version: "19.2.7",
+            publishedAt: "2026-06-01T00:00:00.000Z",
+            loaded: false,
+          },
+        ],
       },
     });
   });
