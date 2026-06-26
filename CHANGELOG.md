@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0 - 2026-06-26
+
+- Added a dashboard view for tracking multiple packages with local persistence, comma-separated package entry, row refresh actions, and direct navigation back to package measurements.
+- Added a result-header version dropdown and Load Latest action for stable version measurements.
+
 ## 0.1.0 - 2026-06-26
 
 - Added the package-size CLI and local dashboard for browser-resolved npm artifact measurements.

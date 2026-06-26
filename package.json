@@ -1,6 +1,6 @@
 {
   "name": "@patrickjs/package-size",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Browser-resolved npm package artifact size checker.",
   "type": "module",
   "private": false,
