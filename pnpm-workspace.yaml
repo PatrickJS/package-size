@@ -1,0 +1,2 @@
+minimumReleaseAgeExclude:
+  - '@async/framework@0.15.0'

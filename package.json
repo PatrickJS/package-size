@@ -58,20 +58,14 @@
     "access": "public"
   },
   "dependencies": {
-    "@async/framework": "0.12.2",
+    "@async/framework": "0.15.0",
     "@async/json": "^0.4.0",
-    "brotli-wasm": "3.0.1",
-    "lucide-react": "1.21.0",
-    "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "brotli-wasm": "3.0.1"
   },
   "devDependencies": {
     "@async/pipeline": "0.9.29",
     "@tailwindcss/vite": "4.3.1",
     "@testing-library/jest-dom": "6.9.1",
-    "@testing-library/react": "16.3.2",
-    "@testing-library/user-event": "14.6.1",
-    "@vitejs/plugin-react": "6.0.2",
     "jsdom": "29.1.1",
     "tailwindcss": "4.3.1",
     "vite": "8.0.16",
